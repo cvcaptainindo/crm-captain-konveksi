@@ -1,0 +1,51 @@
+name: CI & Build CRM Captain Konveksi
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Run TypeScript Lint / Check
+      run: npm run lint
+
+    - name: Build Application (Vite Frontend & Server Backend)
+      run: npm run build
+
+# Opsional: Jika ingin auto-deploy via SSH ke VPS Hostinger setiap kali push ke main:
+# Uncomment langkah di bawah ini dan tambahkan secrets di GitHub (Settings > Secrets and variables > Actions):
+# HOSTINGER_HOST, HOSTINGER_USER, HOSTINGER_SSH_KEY, HOSTINGER_PORT
+#
+#   deploy-to-hostinger:
+#     needs: build-and-verify
+#     if: github.ref == 'refs/heads/main'
+#     runs-on: ubuntu-latest
+#     steps:
+#     - name: Deploy via SSH
+#       uses: appleboy/ssh-action@v1.0.3
+#       with:
+#         host: ${{ secrets.HOSTINGER_HOST }}
+#         username: ${{ secrets.HOSTINGER_USER }}
+#         key: ${{ secrets.HOSTINGER_SSH_KEY }}
+#         port: ${{ secrets.HOSTINGER_PORT || 22 }}
+#         script: |
+#           cd ~/crm-captain-konveksi
+#           chmod +x deploy.sh
+#           ./deploy.sh

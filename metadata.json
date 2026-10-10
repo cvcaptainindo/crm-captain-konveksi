@@ -1,0 +1,8 @@
+{
+  "name": "CRM Captain Konveksi",
+  "description": "Sistem CRM dan manajemen follow-up customer terstruktur untuk Captain Konveksi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
