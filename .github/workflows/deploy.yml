@@ -20,8 +20,11 @@ jobs:
         node-version: 20
         cache: 'npm'
 
-    - name: Install dependencies
-      run: npm install
+    - name: Clean install dependencies
+      run: npm ci
+
+    - name: Run Automated Test Suite
+      run: npm test
 
     - name: Run TypeScript Lint / Check
       run: npm run lint
