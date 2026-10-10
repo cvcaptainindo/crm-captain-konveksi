@@ -1,16 +1,16 @@
 import { Response } from 'express';
-import { db, Customer, CustomerCustomRule } from '../database/db.js';
+import { pool, withTransaction, Customer, CustomerCustomRule } from '../database/db.js';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
 import {
   calculateDaysSinceContact,
   determineFollowUpCategory,
-  computeNextFollowUp,
+  computeCustomerNextFollowUp,
   getTodayDateString,
 } from '../services/followUpEngine.js';
 import { sanitizeWhatsAppPhone } from '../services/templateParser.js';
 import { logAudit } from '../services/auditLogger.js';
 
-export function getCustomers(req: AuthenticatedRequest, res: Response) {
+export async function getCustomers(req: AuthenticatedRequest, res: Response): Promise<void> {
   const {
     search,
     status_id,
@@ -22,149 +22,203 @@ export function getCustomers(req: AuthenticatedRequest, res: Response) {
     sort_dir = 'asc',
   } = req.query;
 
-  const state = db.getState();
-  let list = state.customers.filter(c => c.deleted_at === null);
+  try {
+    const conditions: string[] = ['c.deleted_at IS NULL'];
+    const params: any[] = [];
 
-  // SALES role data scoping: if user is SALES, they only see their assigned customers
-  // (Unless explicit sales_id filter or Admin override)
-  if (req.user?.role === 'SALES') {
-    list = list.filter(c => c.assigned_sales_id === req.user!.id);
-  } else if (sales_id && sales_id !== 'all') {
-    list = list.filter(c => c.assigned_sales_id === parseInt(sales_id as string, 10));
-  }
+    // 1. SALES role scoping: strictly only assigned customers
+    if (req.user?.role === 'SALES') {
+      conditions.push('c.assigned_sales_id = ?');
+      params.push(req.user.id);
+    } else if (sales_id && sales_id !== 'all') {
+      conditions.push('c.assigned_sales_id = ?');
+      params.push(parseInt(sales_id as string, 10));
+    }
 
-  // Filter by customer status
-  if (status_id && status_id !== 'all') {
-    list = list.filter(c => c.status_id === parseInt(status_id as string, 10));
-  }
+    // 2. Status filter
+    if (status_id && status_id !== 'all') {
+      conditions.push('c.status_id = ?');
+      params.push(parseInt(status_id as string, 10));
+    }
 
-  // Search filter (name, company, pic, city, wa)
-  if (search && typeof search === 'string' && search.trim() !== '') {
-    const q = search.trim().toLowerCase();
-    list = list.filter(
-      c =>
-        c.name.toLowerCase().includes(q) ||
-        (c.company_name && c.company_name.toLowerCase().includes(q)) ||
-        (c.pic_name && c.pic_name.toLowerCase().includes(q)) ||
-        (c.city && c.city.toLowerCase().includes(q)) ||
-        c.whatsapp_number.includes(q) ||
-        (c.customer_code && c.customer_code.toLowerCase().includes(q))
-    );
-  }
+    // 3. Search filter
+    if (search && typeof search === 'string' && search.trim() !== '') {
+      const q = `%${search.trim().toLowerCase()}%`;
+      conditions.push(`(
+        LOWER(c.name) LIKE ? OR
+        LOWER(COALESCE(c.company_name, '')) LIKE ? OR
+        LOWER(COALESCE(c.pic_name, '')) LIKE ? OR
+        LOWER(COALESCE(c.city, '')) LIKE ? OR
+        c.whatsapp_number LIKE ? OR
+        LOWER(COALESCE(c.customer_code, '')) LIKE ?
+      )`);
+      params.push(q, q, q, q, q, q);
+    }
 
-  // Filter by follow-up status (OVERDUE, DUE_TODAY, UPCOMING, COMPLETED)
-  const enrichedList = list.map(c => {
-    const statusObj = state.customer_statuses.find(s => s.id === c.status_id);
-    const fuStatus = determineFollowUpCategory(c.next_follow_up_date, statusObj?.code);
-    const daysSinceContact = calculateDaysSinceContact(c.last_contact_date);
-    const salesUser = state.users.find(u => u.id === c.assigned_sales_id);
+    const whereClause = conditions.join(' AND ');
 
-    return {
-      ...c,
-      status: statusObj,
-      sales: salesUser ? { id: salesUser.id, name: salesUser.name } : null,
-      fu_status: fuStatus,
-      days_since_contact: daysSinceContact,
-    };
-  });
+    // Query all matching rows to calculate accurate follow-up categories
+    const sql = `
+      SELECT 
+        c.*,
+        s.code AS status_code, s.label AS status_label, s.color_code AS status_color_code, s.sort_order AS status_sort_order,
+        u.name AS sales_name, u.email AS sales_email
+      FROM customers c
+      JOIN customer_statuses s ON c.status_id = s.id
+      LEFT JOIN users u ON c.assigned_sales_id = u.id
+      WHERE ${whereClause}
+    `;
 
-  let filtered = enrichedList;
-  if (fu_status && fu_status !== 'all') {
-    filtered = enrichedList.filter(c => c.fu_status === fu_status);
-  }
+    const [rows] = await pool.query<any[]>(sql, params);
 
-  // Sorting
-  filtered.sort((a, b) => {
-    let valA = (a as any)[sort_by as string];
-    let valB = (b as any)[sort_by as string];
+    // Enrich with follow-up calculation
+    const enrichedList = rows.map(c => {
+      const category = determineFollowUpCategory(c.next_follow_up_date, c.status_code);
+      const daysSince = calculateDaysSinceContact(c.last_contact_date);
 
-    if (!valA) valA = '';
-    if (!valB) valB = '';
-
-    if (valA < valB) return sort_dir === 'desc' ? 1 : -1;
-    if (valA > valB) return sort_dir === 'desc' ? -1 : 1;
-    return 0;
-  });
-
-  // Pagination
-  const p = Math.max(1, parseInt(page as string, 10));
-  const l = Math.max(1, parseInt(limit as string, 10));
-  const total = filtered.length;
-  const totalPages = Math.ceil(total / l);
-  const paginated = filtered.slice((p - 1) * l, p * l);
-
-  res.json({
-    success: true,
-    data: paginated,
-    meta: {
-      page: p,
-      limit: l,
-      total,
-      total_pages: totalPages,
-    },
-  });
-}
-
-export function getCustomerById(req: AuthenticatedRequest, res: Response) {
-  const customerId = parseInt(req.params.id, 10);
-  const state = db.getState();
-  const customer = state.customers.find(c => c.id === customerId);
-
-  if (!customer) {
-    res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
-    return;
-  }
-
-  // Permission check for SALES
-  if (req.user?.role === 'SALES' && customer.assigned_sales_id !== req.user.id) {
-    res.status(403).json({ success: false, message: 'Anda tidak memiliki akses ke customer ini.' });
-    return;
-  }
-
-  const statusObj = state.customer_statuses.find(s => s.id === customer.status_id);
-  const salesUser = state.users.find(u => u.id === customer.assigned_sales_id);
-  const fuStatus = determineFollowUpCategory(customer.next_follow_up_date, statusObj?.code);
-  const daysSinceContact = calculateDaysSinceContact(customer.last_contact_date);
-
-  const customRules = state.customer_custom_rules
-    .filter(r => r.customer_id === customer.id)
-    .sort((a, b) => a.step_number - b.step_number);
-
-  const activities = state.follow_up_activities
-    .filter(a => a.customer_id === customer.id)
-    .map(a => {
-      const u = state.users.find(usr => usr.id === a.user_id);
-      const t = state.whatsapp_templates.find(tpl => tpl.id === a.template_id);
       return {
-        ...a,
-        user_name: u?.name || 'Sales Staff',
-        template_name: t?.title || null,
+        ...c,
+        status: {
+          id: c.status_id,
+          code: c.status_code,
+          label: c.status_label,
+          color_code: c.status_color_code,
+          sort_order: c.status_sort_order,
+        },
+        sales: c.assigned_sales_id ? { id: c.assigned_sales_id, name: c.sales_name, email: c.sales_email } : null,
+        fu_status: category,
+        days_since_contact: daysSince,
       };
-    })
-  const transactions = (state.transactions || [])
-    .filter(t => t.customer_id === customer.id)
-    .sort((a, b) => (b.transaction_date > a.transaction_date ? 1 : -1));
-  const totalOmzet = transactions
-    .filter(t => t.status === 'CLOSING')
-    .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    });
 
-  res.json({
-    success: true,
-    data: {
-      ...customer,
-      status: statusObj,
-      sales: salesUser ? { id: salesUser.id, name: salesUser.name, email: salesUser.email, phone: salesUser.phone } : null,
-      fu_status: fuStatus,
-      days_since_contact: daysSinceContact,
-      custom_rules: customRules,
-      activities,
-      transactions,
-      total_omzet: totalOmzet,
-    },
-  });
+    let filtered = enrichedList;
+    if (fu_status && fu_status !== 'all') {
+      filtered = enrichedList.filter(c => c.fu_status === fu_status);
+    }
+
+    // Safe sorting
+    const allowedSortFields = ['name', 'company_name', 'next_follow_up_date', 'last_contact_date', 'created_at'];
+    const safeSortBy = allowedSortFields.includes(sort_by as string) ? (sort_by as string) : 'next_follow_up_date';
+    const isDesc = (sort_dir as string).toLowerCase() === 'desc';
+
+    filtered.sort((a, b) => {
+      let valA = (a as any)[safeSortBy] ?? '';
+      let valB = (b as any)[safeSortBy] ?? '';
+      if (valA < valB) return isDesc ? 1 : -1;
+      if (valA > valB) return isDesc ? -1 : 1;
+      return 0;
+    });
+
+    // Pagination
+    const p = Math.max(1, parseInt(page as string, 10));
+    const l = Math.max(1, parseInt(limit as string, 10));
+    const total = filtered.length;
+    const totalPages = Math.ceil(total / l);
+    const paginated = filtered.slice((p - 1) * l, p * l);
+
+    res.json({
+      success: true,
+      data: paginated,
+      meta: {
+        page: p,
+        limit: l,
+        total,
+        total_pages: totalPages,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Customer getCustomers error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memuat data pelanggan.' });
+  }
 }
 
-export function createCustomer(req: AuthenticatedRequest, res: Response) {
+export async function getCustomerById(req: AuthenticatedRequest, res: Response): Promise<void> {
+  const customerId = parseInt(req.params.id, 10);
+
+  try {
+    const [cRows] = await pool.query<any[]>(
+      `SELECT 
+        c.*,
+        s.code AS status_code, s.label AS status_label, s.color_code AS status_color_code, s.sort_order AS status_sort_order,
+        u.name AS sales_name, u.email AS sales_email, u.phone AS sales_phone
+       FROM customers c
+       JOIN customer_statuses s ON c.status_id = s.id
+       LEFT JOIN users u ON c.assigned_sales_id = u.id
+       WHERE c.id = ? LIMIT 1`,
+      [customerId]
+    );
+
+    if (!cRows || cRows.length === 0) {
+      res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
+      return;
+    }
+
+    const customer = cRows[0];
+
+    // Permission check for SALES
+    if (req.user?.role === 'SALES' && customer.assigned_sales_id !== req.user.id) {
+      res.status(403).json({ success: false, message: 'Anda tidak memiliki akses ke customer ini.' });
+      return;
+    }
+
+    // Query custom rules
+    const [customRules] = await pool.query<any[]>(
+      'SELECT * FROM customer_custom_rules WHERE customer_id = ? ORDER BY step_number ASC',
+      [customerId]
+    );
+
+    // Query follow-up activities
+    const [activities] = await pool.query<any[]>(
+      `SELECT a.*, u.name AS user_name, t.title AS template_name
+       FROM follow_up_activities a
+       LEFT JOIN users u ON a.user_id = u.id
+       LEFT JOIN whatsapp_templates t ON a.template_id = t.id
+       WHERE a.customer_id = ?
+       ORDER BY a.activity_date DESC`,
+      [customerId]
+    );
+
+    // Query transactions
+    const [transactions] = await pool.query<any[]>(
+      'SELECT * FROM transactions WHERE customer_id = ? ORDER BY transaction_date DESC, id DESC',
+      [customerId]
+    );
+
+    const totalOmzet = transactions
+      .filter((t: any) => t.status === 'CLOSING')
+      .reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
+
+    const fuStatus = determineFollowUpCategory(customer.next_follow_up_date, customer.status_code);
+    const daysSinceContact = calculateDaysSinceContact(customer.last_contact_date);
+
+    res.json({
+      success: true,
+      data: {
+        ...customer,
+        status: {
+          id: customer.status_id,
+          code: customer.status_code,
+          label: customer.status_label,
+          color_code: customer.status_color_code,
+        },
+        sales: customer.assigned_sales_id
+          ? { id: customer.assigned_sales_id, name: customer.sales_name, email: customer.sales_email, phone: customer.sales_phone }
+          : null,
+        fu_status: fuStatus,
+        days_since_contact: daysSinceContact,
+        custom_rules: customRules,
+        activities,
+        transactions,
+        total_omzet: totalOmzet,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Customer getCustomerById error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memuat detail pelanggan.' });
+  }
+}
+
+export async function createCustomer(req: AuthenticatedRequest, res: Response): Promise<void> {
   const {
     name,
     company_name,
@@ -186,293 +240,374 @@ export function createCustomer(req: AuthenticatedRequest, res: Response) {
     return;
   }
 
-  const state = db.getState();
-  const id = db.nextId('customers');
-  const now = new Date().toISOString();
-  const today = getTodayDateString();
+  try {
+    const today = getTodayDateString();
+    const sanitizedWA = sanitizeWhatsAppPhone(whatsapp_number);
+    const assignedSales = (req.user?.role === 'ADMIN' && assigned_sales_id)
+      ? parseInt(assigned_sales_id, 10)
+      : req.user!.id;
+    const statusId = status_id ? parseInt(status_id, 10) : 1; // Default PROSPEK
 
-  const customerCode = `CK-${String(id).padStart(4, '0')}`;
-  const sanitizedWA = sanitizeWhatsAppPhone(whatsapp_number);
-  const assignedSales = (req.user?.role === 'ADMIN' && assigned_sales_id)
-    ? parseInt(assigned_sales_id, 10)
-    : req.user!.id;
-  const statusId = status_id ? parseInt(status_id, 10) : 1; // Default PROSPEK
+    const result = await withTransaction(async (conn) => {
+      // 1. Insert customer with provisional code
+      const [insertRes] = await conn.execute<any>(
+        `INSERT INTO customers (
+          customer_code, name, company_name, whatsapp_number, phone_number,
+          email, address, city, pic_name, assigned_sales_id, status_id,
+          notes, use_custom_rule, current_rule_step, last_contact_date,
+          next_follow_up_date, deleted_at, created_at, updated_at
+        ) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, NULL, NOW(), NOW())`,
+        [
+          name.trim(),
+          company_name ? company_name.trim() : '',
+          sanitizedWA,
+          phone_number ? phone_number.trim() : '',
+          email ? email.trim() : '',
+          address ? address.trim() : '',
+          city ? city.trim() : '',
+          pic_name ? pic_name.trim() : '',
+          assignedSales,
+          statusId,
+          notes || '',
+          Boolean(use_custom_rule),
+          today,
+        ]
+      );
 
-  // Initial customer object
-  const newCustomer: Customer = {
-    id,
-    customer_code: customerCode,
-    name: name.trim(),
-    company_name: company_name ? company_name.trim() : '',
-    whatsapp_number: sanitizedWA,
-    phone_number: phone_number ? phone_number.trim() : '',
-    email: email ? email.trim() : '',
-    address: address ? address.trim() : '',
-    city: city ? city.trim() : '',
-    pic_name: pic_name ? pic_name.trim() : '',
-    assigned_sales_id: assignedSales,
-    status_id: statusId,
-    notes: notes || '',
-    use_custom_rule: Boolean(use_custom_rule),
-    current_rule_step: 1,
-    last_contact_date: today,
-    next_follow_up_date: '',
-    deleted_at: null,
-    created_at: now,
-    updated_at: now,
-  };
+      const customerId = insertRes.insertId;
+      const customerCode = `CK-${String(customerId).padStart(4, '0')}`;
 
-  // If custom rules provided
-  if (newCustomer.use_custom_rule && Array.isArray(custom_rules)) {
-    custom_rules.forEach((cr: any, idx: number) => {
-      const crId = db.nextId('customer_custom_rules');
-      state.customer_custom_rules.push({
-        id: crId,
-        customer_id: id,
-        step_number: idx + 1,
-        interval_days: parseInt(cr.interval_days, 10) || 7,
-        created_at: now,
-        updated_at: now,
-      });
+      // 2. Insert custom rules if any
+      if (Boolean(use_custom_rule) && Array.isArray(custom_rules) && custom_rules.length > 0) {
+        for (let i = 0; i < custom_rules.length; i++) {
+          const cr = custom_rules[i];
+          await conn.execute(
+            `INSERT INTO customer_custom_rules (customer_id, step_number, interval_days, created_at, updated_at)
+             VALUES (?, ?, ?, NOW(), NOW())`,
+            [customerId, i + 1, parseInt(cr.interval_days, 10) || 7]
+          );
+        }
+      }
+
+      // 3. Compute first follow-up date
+      const { nextDate } = await computeCustomerNextFollowUp(
+        { id: customerId, use_custom_rule: Boolean(use_custom_rule), current_rule_step: 1 },
+        false
+      );
+
+      // 4. Update customer_code and next_follow_up_date
+      await conn.execute(
+        'UPDATE customers SET customer_code = ?, next_follow_up_date = ? WHERE id = ?',
+        [customerCode, nextDate, customerId]
+      );
+
+      return { customerId, customerCode, nextDate };
     });
+
+    await logAudit({
+      userId: req.user?.id,
+      action: 'CREATE_CUSTOMER',
+      entity: 'CUSTOMER',
+      entityId: result.customerId,
+      newData: {
+        id: result.customerId,
+        code: result.customerCode,
+        name: name.trim(),
+        company: company_name,
+        assigned_sales_id: assignedSales,
+        next_follow_up_date: result.nextDate,
+      },
+    });
+
+    const [createdRows] = await pool.query<any[]>('SELECT * FROM customers WHERE id = ?', [result.customerId]);
+
+    res.status(201).json({
+      success: true,
+      message: 'Customer baru berhasil ditambahkan.',
+      data: createdRows[0],
+    });
+  } catch (err: any) {
+    console.error('[Customer createCustomer error]', err);
+    res.status(500).json({ success: false, message: 'Gagal menambahkan customer baru.' });
   }
-
-  // Calculate first follow-up date
-  const { nextDate } = computeNextFollowUp(newCustomer, false);
-  newCustomer.next_follow_up_date = nextDate;
-
-  state.customers.push(newCustomer);
-  db.save();
-
-  logAudit({
-    userId: req.user?.id,
-    action: 'CREATE_CUSTOMER',
-    entity: 'CUSTOMER',
-    entityId: newCustomer.id,
-    newData: {
-      id: newCustomer.id,
-      code: newCustomer.customer_code,
-      name: newCustomer.name,
-      company: newCustomer.company_name,
-      assigned_sales_id: newCustomer.assigned_sales_id,
-      next_follow_up_date: newCustomer.next_follow_up_date,
-    },
-  });
-
-  res.status(201).json({
-    success: true,
-    message: 'Customer baru berhasil ditambahkan.',
-    data: newCustomer,
-  });
 }
 
-export function updateCustomer(req: AuthenticatedRequest, res: Response) {
+export async function updateCustomer(req: AuthenticatedRequest, res: Response): Promise<void> {
   const customerId = parseInt(req.params.id, 10);
-  const state = db.getState();
-  const customer = state.customers.find(c => c.id === customerId);
 
-  if (!customer) {
-    res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
-    return;
-  }
+  try {
+    const [cRows] = await pool.query<any[]>('SELECT * FROM customers WHERE id = ? LIMIT 1', [customerId]);
 
-  // Permission check for SALES
-  if (req.user?.role === 'SALES' && customer.assigned_sales_id !== req.user.id) {
-    res.status(403).json({ success: false, message: 'Akses ditolak.' });
-    return;
-  }
-
-  const oldData = { ...customer };
-  const {
-    name,
-    company_name,
-    whatsapp_number,
-    phone_number,
-    email,
-    address,
-    city,
-    pic_name,
-    assigned_sales_id,
-    status_id,
-    notes,
-    use_custom_rule,
-    custom_rules,
-    next_follow_up_date,
-  } = req.body;
-
-  if (name) customer.name = name.trim();
-  if (company_name !== undefined) customer.company_name = company_name ? company_name.trim() : '';
-  if (whatsapp_number) customer.whatsapp_number = sanitizeWhatsAppPhone(whatsapp_number);
-  if (phone_number !== undefined) customer.phone_number = phone_number ? phone_number.trim() : '';
-  if (email !== undefined) customer.email = email ? email.trim() : '';
-  if (address !== undefined) customer.address = address ? address.trim() : '';
-  if (city !== undefined) customer.city = city ? city.trim() : '';
-  if (pic_name !== undefined) customer.pic_name = pic_name ? pic_name.trim() : '';
-  if (status_id) customer.status_id = parseInt(status_id, 10);
-  if (notes !== undefined) customer.notes = notes;
-  if (next_follow_up_date) customer.next_follow_up_date = next_follow_up_date;
-
-  // Only Admin can reassign sales
-  if (req.user?.role === 'ADMIN' && assigned_sales_id) {
-    customer.assigned_sales_id = parseInt(assigned_sales_id, 10);
-  }
-
-  // Custom rules handling
-  if (use_custom_rule !== undefined) {
-    customer.use_custom_rule = Boolean(use_custom_rule);
-    if (customer.use_custom_rule && Array.isArray(custom_rules)) {
-      // Remove existing custom rules
-      state.customer_custom_rules = state.customer_custom_rules.filter(r => r.customer_id !== customer.id);
-      const now = new Date().toISOString();
-      custom_rules.forEach((cr: any, idx: number) => {
-        const crId = db.nextId('customer_custom_rules');
-        state.customer_custom_rules.push({
-          id: crId,
-          customer_id: customer.id,
-          step_number: idx + 1,
-          interval_days: parseInt(cr.interval_days, 10) || 7,
-          created_at: now,
-          updated_at: now,
-        });
-      });
+    if (!cRows || cRows.length === 0) {
+      res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
+      return;
     }
-  }
 
-  customer.updated_at = new Date().toISOString();
-  db.save();
+    const customer = cRows[0];
 
-  logAudit({
-    userId: req.user?.id,
-    action: 'UPDATE_CUSTOMER',
-    entity: 'CUSTOMER',
-    entityId: customer.id,
-    oldData,
-    newData: customer,
-  });
+    // Permission check for SALES
+    if (req.user?.role === 'SALES' && customer.assigned_sales_id !== req.user.id) {
+      res.status(403).json({ success: false, message: 'Akses ditolak.' });
+      return;
+    }
 
-  res.json({
-    success: true,
-    message: 'Data customer berhasil diperbarui.',
-    data: customer,
-  });
-}
+    const {
+      name,
+      company_name,
+      whatsapp_number,
+      phone_number,
+      email,
+      address,
+      city,
+      pic_name,
+      assigned_sales_id,
+      status_id,
+      notes,
+      use_custom_rule,
+      custom_rules,
+      next_follow_up_date,
+    } = req.body;
 
-export function softDeleteCustomer(req: AuthenticatedRequest, res: Response) {
-  const customerId = parseInt(req.params.id, 10);
-  const state = db.getState();
-  const customer = state.customers.find(c => c.id === customerId);
+    let updatedName = name ? name.trim() : customer.name;
+    let updatedCompany = company_name !== undefined ? company_name.trim() : customer.company_name;
+    let updatedWA = whatsapp_number ? sanitizeWhatsAppPhone(whatsapp_number) : customer.whatsapp_number;
+    let updatedPhone = phone_number !== undefined ? phone_number.trim() : customer.phone_number;
+    let updatedEmail = email !== undefined ? email.trim() : customer.email;
+    let updatedAddress = address !== undefined ? address.trim() : customer.address;
+    let updatedCity = city !== undefined ? city.trim() : customer.city;
+    let updatedPic = pic_name !== undefined ? pic_name.trim() : customer.pic_name;
+    let updatedStatusId = status_id ? parseInt(status_id, 10) : customer.status_id;
+    let updatedNotes = notes !== undefined ? notes : customer.notes;
+    let updatedNextDate = next_follow_up_date || customer.next_follow_up_date;
+    let updatedSalesId = customer.assigned_sales_id;
 
-  if (!customer) {
-    res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
-    return;
-  }
+    if (req.user?.role === 'ADMIN' && assigned_sales_id) {
+      updatedSalesId = parseInt(assigned_sales_id, 10);
+    }
 
-  customer.deleted_at = new Date().toISOString();
-  customer.updated_at = new Date().toISOString();
-  db.save();
+    let updatedUseCustom = use_custom_rule !== undefined ? Boolean(use_custom_rule) : customer.use_custom_rule;
 
-  logAudit({
-    userId: req.user?.id,
-    action: 'SOFT_DELETE_CUSTOMER',
-    entity: 'CUSTOMER',
-    entityId: customer.id,
-    newData: { id: customer.id, name: customer.name, deleted_at: customer.deleted_at },
-  });
+    await withTransaction(async (conn) => {
+      await conn.execute(
+        `UPDATE customers SET
+          name = ?, company_name = ?, whatsapp_number = ?, phone_number = ?,
+          email = ?, address = ?, city = ?, pic_name = ?, assigned_sales_id = ?,
+          status_id = ?, notes = ?, use_custom_rule = ?, next_follow_up_date = ?,
+          updated_at = NOW()
+        WHERE id = ?`,
+        [
+          updatedName,
+          updatedCompany,
+          updatedWA,
+          updatedPhone,
+          updatedEmail,
+          updatedAddress,
+          updatedCity,
+          updatedPic,
+          updatedSalesId,
+          updatedStatusId,
+          updatedNotes,
+          updatedUseCustom,
+          updatedNextDate,
+          customerId,
+        ]
+      );
 
-  res.json({
-    success: true,
-    message: 'Customer dipindahkan ke Trash (Soft Delete).',
-  });
-}
-
-export function getTrashCustomers(req: AuthenticatedRequest, res: Response) {
-  const state = db.getState();
-  const trash = state.customers
-    .filter(c => c.deleted_at !== null)
-    .map(c => {
-      const statusObj = state.customer_statuses.find(s => s.id === c.status_id);
-      const salesUser = state.users.find(u => u.id === c.assigned_sales_id);
-      return {
-        ...c,
-        status: statusObj,
-        sales: salesUser ? { id: salesUser.id, name: salesUser.name } : null,
-      };
+      if (use_custom_rule !== undefined && updatedUseCustom && Array.isArray(custom_rules)) {
+        await conn.execute('DELETE FROM customer_custom_rules WHERE customer_id = ?', [customerId]);
+        for (let i = 0; i < custom_rules.length; i++) {
+          const cr = custom_rules[i];
+          await conn.execute(
+            `INSERT INTO customer_custom_rules (customer_id, step_number, interval_days, created_at, updated_at)
+             VALUES (?, ?, ?, NOW(), NOW())`,
+            [customerId, i + 1, parseInt(cr.interval_days, 10) || 7]
+          );
+        }
+      }
     });
 
-  res.json({
-    success: true,
-    data: trash,
-  });
-}
+    await logAudit({
+      userId: req.user?.id,
+      action: 'UPDATE_CUSTOMER',
+      entity: 'CUSTOMER',
+      entityId: customerId,
+      oldData: customer,
+      newData: { id: customerId, name: updatedName, company: updatedCompany },
+    });
 
-export function restoreCustomer(req: AuthenticatedRequest, res: Response) {
-  const customerId = parseInt(req.params.id, 10);
-  const state = db.getState();
-  const customer = state.customers.find(c => c.id === customerId);
+    const [updatedRows] = await pool.query<any[]>('SELECT * FROM customers WHERE id = ?', [customerId]);
 
-  if (!customer || customer.deleted_at === null) {
-    res.status(404).json({ success: false, message: 'Customer tidak ditemukan di Trash.' });
-    return;
+    res.json({
+      success: true,
+      message: 'Data customer berhasil diperbarui.',
+      data: updatedRows[0],
+    });
+  } catch (err: any) {
+    console.error('[Customer updateCustomer error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memperbarui data customer.' });
   }
-
-  customer.deleted_at = null;
-  customer.updated_at = new Date().toISOString();
-  db.save();
-
-  logAudit({
-    userId: req.user?.id,
-    action: 'RESTORE_CUSTOMER',
-    entity: 'CUSTOMER',
-    entityId: customer.id,
-    newData: { id: customer.id, name: customer.name },
-  });
-
-  res.json({
-    success: true,
-    message: 'Customer berhasil dipulihkan dari Trash.',
-  });
 }
 
-export function permanentDeleteCustomer(req: AuthenticatedRequest, res: Response) {
+export async function softDeleteCustomer(req: AuthenticatedRequest, res: Response): Promise<void> {
   const customerId = parseInt(req.params.id, 10);
-  const state = db.getState();
-  const index = state.customers.findIndex(c => c.id === customerId);
 
-  if (index === -1) {
-    res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
-    return;
+  try {
+    const [cRows] = await pool.query<any[]>('SELECT id, name FROM customers WHERE id = ? LIMIT 1', [customerId]);
+
+    if (!cRows || cRows.length === 0) {
+      res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
+      return;
+    }
+
+    await pool.execute('UPDATE customers SET deleted_at = NOW(), updated_at = NOW() WHERE id = ?', [customerId]);
+
+    await logAudit({
+      userId: req.user?.id,
+      action: 'SOFT_DELETE_CUSTOMER',
+      entity: 'CUSTOMER',
+      entityId: customerId,
+      newData: { id: customerId, name: cRows[0].name, deleted_at: new Date().toISOString() },
+    });
+
+    res.json({
+      success: true,
+      message: 'Customer dipindahkan ke Trash (Soft Delete).',
+    });
+  } catch (err: any) {
+    console.error('[Customer softDeleteCustomer error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memindahkan customer ke Trash.' });
   }
-
-  const deletedCustomer = state.customers[index];
-
-  // Cascading deletes for custom rules and activities
-  state.customers.splice(index, 1);
-  state.customer_custom_rules = state.customer_custom_rules.filter(r => r.customer_id !== customerId);
-  state.follow_up_activities = state.follow_up_activities.filter(a => a.customer_id !== customerId);
-  db.save();
-
-  logAudit({
-    userId: req.user?.id,
-    action: 'PERMANENT_DELETE_CUSTOMER',
-    entity: 'CUSTOMER',
-    entityId: customerId,
-    oldData: { id: deletedCustomer.id, code: deletedCustomer.customer_code, name: deletedCustomer.name },
-  });
-
-  res.json({
-    success: true,
-    message: 'Customer dan seluruh relasi histori berhasil dihapus permanen.',
-  });
 }
 
-export function getStatuses(req: AuthenticatedRequest, res: Response) {
-  const state = db.getState();
-  const statuses = state.customer_statuses
-    .filter(s => s.is_active)
-    .sort((a, b) => a.sort_order - b.sort_order);
+export async function getTrashCustomers(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const sql = `
+      SELECT 
+        c.*,
+        s.label AS status_label, s.color_code AS status_color_code,
+        u.name AS sales_name
+      FROM customers c
+      JOIN customer_statuses s ON c.status_id = s.id
+      LEFT JOIN users u ON c.assigned_sales_id = u.id
+      WHERE c.deleted_at IS NOT NULL
+      ORDER BY c.deleted_at DESC
+    `;
 
-  res.json({
-    success: true,
-    data: statuses,
-  });
+    const [rows] = await pool.query<any[]>(sql);
+
+    const formatted = rows.map(c => ({
+      ...c,
+      status: { id: c.status_id, label: c.status_label, color_code: c.status_color_code },
+      sales: c.assigned_sales_id ? { id: c.assigned_sales_id, name: c.sales_name } : null,
+    }));
+
+    res.json({
+      success: true,
+      data: formatted,
+    });
+  } catch (err: any) {
+    console.error('[Customer getTrashCustomers error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memuat data Trash.' });
+  }
+}
+
+export async function restoreCustomer(req: AuthenticatedRequest, res: Response): Promise<void> {
+  const customerId = parseInt(req.params.id, 10);
+
+  try {
+    const [cRows] = await pool.query<any[]>(
+      'SELECT id, name FROM customers WHERE id = ? AND deleted_at IS NOT NULL LIMIT 1',
+      [customerId]
+    );
+
+    if (!cRows || cRows.length === 0) {
+      res.status(404).json({ success: false, message: 'Customer tidak ditemukan di Trash.' });
+      return;
+    }
+
+    await pool.execute('UPDATE customers SET deleted_at = NULL, updated_at = NOW() WHERE id = ?', [customerId]);
+
+    await logAudit({
+      userId: req.user?.id,
+      action: 'RESTORE_CUSTOMER',
+      entity: 'CUSTOMER',
+      entityId: customerId,
+      newData: { id: customerId, name: cRows[0].name },
+    });
+
+    res.json({
+      success: true,
+      message: 'Customer berhasil dipulihkan dari Trash.',
+    });
+  } catch (err: any) {
+    console.error('[Customer restoreCustomer error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memulihkan customer dari Trash.' });
+  }
+}
+
+export async function permanentDeleteCustomer(req: AuthenticatedRequest, res: Response): Promise<void> {
+  const customerId = parseInt(req.params.id, 10);
+
+  try {
+    const [cRows] = await pool.query<any[]>('SELECT id, customer_code, name FROM customers WHERE id = ? LIMIT 1', [customerId]);
+
+    if (!cRows || cRows.length === 0) {
+      res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
+      return;
+    }
+
+    // Business Data Retention Policy: Check if customer has closing/cancel transactions
+    const [trxRows] = await pool.query<any[]>(
+      'SELECT COUNT(*) AS trx_count FROM transactions WHERE customer_id = ?',
+      [customerId]
+    );
+
+    const trxCount = Number(trxRows[0]?.trx_count) || 0;
+    if (trxCount > 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Pelanggan memiliki riwayat transaksi/omzet dan tidak boleh dihapus permanen demi audit keuangan. Gunakan Soft Delete (Trash) atau Nonaktifkan status akun pelanggan.',
+      });
+      return;
+    }
+
+    // Atomic permanent deletion for customer with no transactions
+    await withTransaction(async (conn) => {
+      await conn.execute('DELETE FROM customer_custom_rules WHERE customer_id = ?', [customerId]);
+      await conn.execute('DELETE FROM follow_up_activities WHERE customer_id = ?', [customerId]);
+      await conn.execute('DELETE FROM customers WHERE id = ?', [customerId]);
+    });
+
+    await logAudit({
+      userId: req.user?.id,
+      action: 'PERMANENT_DELETE_CUSTOMER',
+      entity: 'CUSTOMER',
+      entityId: customerId,
+      oldData: cRows[0],
+    });
+
+    res.json({
+      success: true,
+      message: 'Customer dan seluruh relasi histori follow-up berhasil dihapus permanen.',
+    });
+  } catch (err: any) {
+    console.error('[Customer permanentDeleteCustomer error]', err);
+    res.status(500).json({ success: false, message: 'Gagal menghapus customer permanen.' });
+  }
+}
+
+export async function getStatuses(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const [rows] = await pool.query<any[]>(
+      'SELECT * FROM customer_statuses WHERE is_active = TRUE ORDER BY sort_order ASC'
+    );
+
+    res.json({
+      success: true,
+      data: rows,
+    });
+  } catch (err: any) {
+    console.error('[Customer getStatuses error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memuat status pelanggan.' });
+  }
 }

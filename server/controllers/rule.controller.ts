@@ -1,17 +1,25 @@
 import { Response } from 'express';
-import { db, FollowUpRule } from '../database/db.js';
+import { pool, FollowUpRule } from '../database/db.js';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
 import { logAudit } from '../services/auditLogger.js';
 
-export function getRules(req: AuthenticatedRequest, res: Response) {
-  const rules = db.getState().follow_up_rules.sort((a, b) => a.step_number - b.step_number);
-  res.json({
-    success: true,
-    data: rules,
-  });
+export async function getRules(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const [rules] = await pool.query<any[]>(
+      'SELECT * FROM follow_up_rules ORDER BY step_number ASC'
+    );
+
+    res.json({
+      success: true,
+      data: rules,
+    });
+  } catch (err: any) {
+    console.error('[Rule getRules error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memuat aturan follow-up.' });
+  }
 }
 
-export function createRule(req: AuthenticatedRequest, res: Response) {
+export async function createRule(req: AuthenticatedRequest, res: Response): Promise<void> {
   const { step_number, name, interval_days, description, is_active } = req.body;
 
   if (!name || interval_days === undefined) {
@@ -19,102 +27,128 @@ export function createRule(req: AuthenticatedRequest, res: Response) {
     return;
   }
 
-  const state = db.getState();
-  const step = step_number ? parseInt(step_number, 10) : state.follow_up_rules.length + 1;
-  const now = new Date().toISOString();
-  const id = db.nextId('follow_up_rules');
+  try {
+    let step = step_number ? parseInt(step_number, 10) : 1;
+    if (!step_number) {
+      const [maxStep] = await pool.query<any[]>('SELECT MAX(step_number) AS max_step FROM follow_up_rules');
+      step = (maxStep[0]?.max_step || 0) + 1;
+    }
 
-  const newRule: FollowUpRule = {
-    id,
-    step_number: step,
-    name: name.trim(),
-    interval_days: parseInt(interval_days, 10),
-    is_active: is_active !== undefined ? Boolean(is_active) : true,
-    description: description || '',
-    created_at: now,
-    updated_at: now,
-  };
+    const [result] = await pool.execute<any>(
+      `INSERT INTO follow_up_rules (step_number, name, interval_days, is_active, description, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        step,
+        name.trim(),
+        parseInt(interval_days, 10),
+        is_active !== undefined ? Boolean(is_active) : true,
+        description || '',
+      ]
+    );
 
-  state.follow_up_rules.push(newRule);
-  db.save();
+    const newRuleId = result.insertId;
 
-  logAudit({
-    userId: req.user?.id,
-    action: 'CREATE_FOLLOW_UP_RULE',
-    entity: 'RULE',
-    entityId: newRule.id,
-    newData: newRule,
-  });
+    await logAudit({
+      userId: req.user?.id,
+      action: 'CREATE_FOLLOW_UP_RULE',
+      entity: 'RULE',
+      entityId: newRuleId,
+      newData: { id: newRuleId, step_number: step, name: name.trim(), interval_days },
+    });
 
-  res.status(201).json({
-    success: true,
-    message: 'Aturan follow-up berhasil ditambahkan.',
-    data: newRule,
-  });
+    const [createdRows] = await pool.query<any[]>('SELECT * FROM follow_up_rules WHERE id = ?', [newRuleId]);
+
+    res.status(201).json({
+      success: true,
+      message: 'Aturan follow-up berhasil ditambahkan.',
+      data: createdRows[0],
+    });
+  } catch (err: any) {
+    console.error('[Rule createRule error]', err);
+    res.status(500).json({ success: false, message: 'Gagal menambahkan aturan follow-up.' });
+  }
 }
 
-export function updateRule(req: AuthenticatedRequest, res: Response) {
+export async function updateRule(req: AuthenticatedRequest, res: Response): Promise<void> {
   const ruleId = parseInt(req.params.id, 10);
   const { step_number, name, interval_days, description, is_active } = req.body;
 
-  const state = db.getState();
-  const rule = state.follow_up_rules.find(r => r.id === ruleId);
+  try {
+    const [rows] = await pool.query<any[]>('SELECT * FROM follow_up_rules WHERE id = ? LIMIT 1', [ruleId]);
 
-  if (!rule) {
-    res.status(404).json({ success: false, message: 'Rule tidak ditemukan.' });
-    return;
+    if (!rows || rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Rule tidak ditemukan.' });
+      return;
+    }
+
+    const rule = rows[0];
+    const oldData = { ...rule };
+
+    let updatedStep = step_number !== undefined ? parseInt(step_number, 10) : rule.step_number;
+    let updatedName = name ? name.trim() : rule.name;
+    let updatedInterval = interval_days !== undefined ? parseInt(interval_days, 10) : rule.interval_days;
+    let updatedDesc = description !== undefined ? description : rule.description;
+    let updatedIsActive = is_active !== undefined ? Boolean(is_active) : rule.is_active;
+
+    await pool.execute(
+      `UPDATE follow_up_rules SET
+        step_number = ?, name = ?, interval_days = ?, description = ?,
+        is_active = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [updatedStep, updatedName, updatedInterval, updatedDesc, updatedIsActive, ruleId]
+    );
+
+    await logAudit({
+      userId: req.user?.id,
+      action: 'UPDATE_FOLLOW_UP_RULE',
+      entity: 'RULE',
+      entityId: ruleId,
+      oldData,
+      newData: { id: ruleId, step_number: updatedStep, name: updatedName, interval_days: updatedInterval },
+    });
+
+    const [updatedRows] = await pool.query<any[]>('SELECT * FROM follow_up_rules WHERE id = ?', [ruleId]);
+
+    res.json({
+      success: true,
+      message: 'Aturan follow-up berhasil diperbarui.',
+      data: updatedRows[0],
+    });
+  } catch (err: any) {
+    console.error('[Rule updateRule error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memperbarui aturan follow-up.' });
   }
-
-  const oldData = { ...rule };
-  if (name) rule.name = name.trim();
-  if (interval_days !== undefined) rule.interval_days = parseInt(interval_days, 10);
-  if (step_number !== undefined) rule.step_number = parseInt(step_number, 10);
-  if (description !== undefined) rule.description = description;
-  if (is_active !== undefined) rule.is_active = Boolean(is_active);
-  rule.updated_at = new Date().toISOString();
-
-  db.save();
-
-  logAudit({
-    userId: req.user?.id,
-    action: 'UPDATE_FOLLOW_UP_RULE',
-    entity: 'RULE',
-    entityId: rule.id,
-    oldData,
-    newData: rule,
-  });
-
-  res.json({
-    success: true,
-    message: 'Aturan follow-up berhasil diperbarui.',
-    data: rule,
-  });
 }
 
-export function deleteRule(req: AuthenticatedRequest, res: Response) {
+export async function deleteRule(req: AuthenticatedRequest, res: Response): Promise<void> {
   const ruleId = parseInt(req.params.id, 10);
-  const state = db.getState();
-  const idx = state.follow_up_rules.findIndex(r => r.id === ruleId);
 
-  if (idx === -1) {
-    res.status(404).json({ success: false, message: 'Rule tidak ditemukan.' });
-    return;
+  try {
+    const [rows] = await pool.query<any[]>('SELECT * FROM follow_up_rules WHERE id = ? LIMIT 1', [ruleId]);
+
+    if (!rows || rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Rule tidak ditemukan.' });
+      return;
+    }
+
+    const deleted = rows[0];
+
+    await pool.execute('DELETE FROM follow_up_rules WHERE id = ?', [ruleId]);
+
+    await logAudit({
+      userId: req.user?.id,
+      action: 'DELETE_FOLLOW_UP_RULE',
+      entity: 'RULE',
+      entityId: ruleId,
+      oldData: deleted,
+    });
+
+    res.json({
+      success: true,
+      message: 'Aturan follow-up berhasil dihapus.',
+    });
+  } catch (err: any) {
+    console.error('[Rule deleteRule error]', err);
+    res.status(500).json({ success: false, message: 'Gagal menghapus aturan follow-up.' });
   }
-
-  const deleted = state.follow_up_rules[idx];
-  state.follow_up_rules.splice(idx, 1);
-  db.save();
-
-  logAudit({
-    userId: req.user?.id,
-    action: 'DELETE_FOLLOW_UP_RULE',
-    entity: 'RULE',
-    entityId: ruleId,
-    oldData: deleted,
-  });
-
-  res.json({
-    success: true,
-    message: 'Aturan follow-up berhasil dihapus.',
-  });
 }

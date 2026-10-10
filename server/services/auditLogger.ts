@@ -1,4 +1,4 @@
-import { db } from '../database/db.js';
+import { pool } from '../database/db.js';
 
 export interface AuditLogParams {
   userId?: number | null;
@@ -12,33 +12,42 @@ export interface AuditLogParams {
   newData?: any;
 }
 
-export function logAudit(params: AuditLogParams) {
-  try {
-    const state = db.getState();
-    const id = db.nextId('audit_logs');
-    const now = new Date().toISOString();
-
-    state.audit_logs.unshift({
-      id,
-      user_id: params.userId ?? null,
-      user_name: params.userName || (params.userId ? state.users.find(u => u.id === params.userId)?.name : 'System'),
-      action: params.action,
-      entity: params.entity,
-      entity_id: params.entityId ?? null,
-      ip_address: params.ipAddress || '127.0.0.1',
-      user_agent: params.userAgent || 'Applet Client',
-      old_data: params.oldData ?? null,
-      new_data: params.newData ?? null,
-      created_at: now,
-    });
-
-    // Cap audit logs at 1000 items in memory to prevent runaway memory
-    if (state.audit_logs.length > 1000) {
-      state.audit_logs = state.audit_logs.slice(0, 1000);
+function sanitizeData(data: any): any {
+  if (!data || typeof data !== 'object') return data;
+  const clone = Array.isArray(data) ? [...data] : { ...data };
+  const sensitiveKeys = ['password', 'password_hash', 'token', 'jwt', 'secret', 'authorization'];
+  
+  for (const key of Object.keys(clone)) {
+    if (sensitiveKeys.some(s => key.toLowerCase().includes(s))) {
+      clone[key] = '[REDACTED]';
+    } else if (typeof clone[key] === 'object' && clone[key] !== null) {
+      clone[key] = sanitizeData(clone[key]);
     }
+  }
+  return clone;
+}
 
-    db.save();
-  } catch (err) {
-    console.error('Failed to log audit:', err);
+export async function logAudit(params: AuditLogParams): Promise<void> {
+  try {
+    const cleanOld = params.oldData ? JSON.stringify(sanitizeData(params.oldData)) : null;
+    const cleanNew = params.newData ? JSON.stringify(sanitizeData(params.newData)) : null;
+
+    await pool.execute(
+      `INSERT INTO audit_logs (user_id, action, entity, entity_id, ip_address, user_agent, old_data, new_data, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        params.userId ?? null,
+        params.action,
+        params.entity,
+        params.entityId ?? null,
+        params.ipAddress || '127.0.0.1',
+        params.userAgent || 'Applet Client',
+        cleanOld,
+        cleanNew,
+      ]
+    );
+  } catch (err: any) {
+    // Non-blocking error handling: never fail business transaction due to audit log failure
+    console.warn('[AuditLog] Warning: Gagal mencatat audit log ke MySQL:', err.message);
   }
 }

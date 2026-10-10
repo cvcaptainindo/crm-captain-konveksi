@@ -1,22 +1,22 @@
 import * as XLSX from 'xlsx';
-import { Customer, FollowUpActivity, db } from '../database/db.js';
+import { Customer, FollowUpActivity } from '../database/db.js';
 import { calculateDaysSinceContact, determineFollowUpCategory } from './followUpEngine.js';
 
 export function generateCustomerExport(
-  customers: Customer[],
-  format: 'xlsx' | 'csv' = 'xlsx'
+  customers: any[],
+  format: 'xlsx' | 'csv' = 'xlsx',
+  statusMap: Map<number, string> = new Map(),
+  userMap: Map<number, string> = new Map()
 ): { buffer: Buffer; mimeType: string; filename: string } {
-  const state = db.getState();
-  const statusMap = new Map(state.customer_statuses.map(s => [s.id, s.label]));
-  const userMap = new Map(state.users.map(u => [u.id, u.name]));
-
   const rows = customers.map(c => {
     const daysSince = calculateDaysSinceContact(c.last_contact_date);
-    const statusCode = state.customer_statuses.find(s => s.id === c.status_id)?.code || '';
-    const fuStatus = determineFollowUpCategory(c.next_follow_up_date, statusCode);
+    const statusLabel = c.status_label || statusMap.get(c.status_id) || 'Unknown';
+    const statusCode = c.status_code || '';
+    const fuStatus = c.fu_status || determineFollowUpCategory(c.next_follow_up_date, statusCode);
+    const salesName = c.sales_name || userMap.get(c.assigned_sales_id) || 'Unassigned';
 
     return {
-      'Kode Customer': c.customer_code,
+      'Kode Customer': c.customer_code || '-',
       'Nama Customer': c.name,
       'Perusahaan': c.company_name || '-',
       'WhatsApp': c.whatsapp_number,
@@ -25,8 +25,8 @@ export function generateCustomerExport(
       'Kota': c.city || '-',
       'Alamat': c.address || '-',
       'PIC Customer': c.pic_name || '-',
-      'Sales PIC': userMap.get(c.assigned_sales_id) || 'Unassigned',
-      'Status': statusMap.get(c.status_id) || 'Unknown',
+      'Sales PIC': salesName,
+      'Status': statusLabel,
       'Status Follow-Up': fuStatus,
       'Kontak Terakhir': c.last_contact_date || '-',
       'Hari Sejak Kontak': `${daysSince} hari`,
@@ -61,23 +61,21 @@ export function generateCustomerExport(
 }
 
 export function generateActivityExport(
-  activities: FollowUpActivity[],
-  format: 'xlsx' | 'csv' = 'xlsx'
+  activities: any[],
+  format: 'xlsx' | 'csv' = 'xlsx',
+  customerMap: Map<number, string> = new Map(),
+  companyMap: Map<number, string> = new Map(),
+  userMap: Map<number, string> = new Map(),
+  templateMap: Map<number, string> = new Map()
 ): { buffer: Buffer; mimeType: string; filename: string } {
-  const state = db.getState();
-  const customerMap = new Map(state.customers.map(c => [c.id, c.name]));
-  const companyMap = new Map(state.customers.map(c => [c.id, c.company_name]));
-  const userMap = new Map(state.users.map(u => [u.id, u.name]));
-  const templateMap = new Map(state.whatsapp_templates.map(t => [t.id, t.title]));
-
   const rows = activities.map(a => ({
     'ID Aktivitas': a.id,
     'Tanggal Aktivitas': a.activity_date,
-    'Nama Customer': customerMap.get(a.customer_id) || `Customer #${a.customer_id}`,
-    'Perusahaan': companyMap.get(a.customer_id) || '-',
-    'Sales Petugas': userMap.get(a.user_id) || `User #${a.user_id}`,
+    'Nama Customer': a.customer_name || customerMap.get(a.customer_id) || `Customer #${a.customer_id}`,
+    'Perusahaan': a.company_name || companyMap.get(a.customer_id) || '-',
+    'Sales Petugas': a.user_name || userMap.get(a.user_id) || `User #${a.user_id}`,
     'Channel': a.channel,
-    'Template WA': a.template_id ? templateMap.get(a.template_id) || '-' : '-',
+    'Template WA': a.template_title || (a.template_id ? templateMap.get(a.template_id) || '-' : '-'),
     'Hasil / Status': a.result_status,
     'Pesan Terkirim': a.message_sent || '-',
     'Catatan Sales': a.notes || '-',
@@ -109,19 +107,17 @@ export function generateActivityExport(
 
 export function generateTransactionExport(
   transactions: any[],
-  format: 'xlsx' | 'csv' = 'xlsx'
+  format: 'xlsx' | 'csv' = 'xlsx',
+  customerMap: Map<number, string> = new Map(),
+  companyMap: Map<number, string> = new Map(),
+  userMap: Map<number, string> = new Map()
 ): { buffer: Buffer; mimeType: string; filename: string } {
-  const state = db.getState();
-  const customerMap = new Map(state.customers.map(c => [c.id, c.name]));
-  const companyMap = new Map(state.customers.map(c => [c.id, c.company_name]));
-  const userMap = new Map(state.users.map(u => [u.id, u.name]));
-
   const rows = transactions.map(t => ({
     'ID Transaksi': t.id,
     'Tanggal Transaksi': t.transaction_date,
-    'Nama Customer': customerMap.get(t.customer_id) || t.customer_name || `Customer #${t.customer_id}`,
-    'Perusahaan': companyMap.get(t.customer_id) || t.company_name || '-',
-    'Sales PIC': userMap.get(t.sales_id) || t.sales_name || `Sales #${t.sales_id}`,
+    'Nama Customer': t.customer_name || customerMap.get(t.customer_id) || `Customer #${t.customer_id}`,
+    'Perusahaan': t.company_name || companyMap.get(t.customer_id) || '-',
+    'Sales PIC': t.sales_name || userMap.get(t.sales_id) || `Sales #${t.sales_id}`,
     'Nama Produk / Pesanan': t.product,
     'Deskripsi': t.description || '-',
     'Nominal Transaksi (Rp)': Number(t.amount) || 0,
@@ -152,4 +148,3 @@ export function generateTransactionExport(
     };
   }
 }
-

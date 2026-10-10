@@ -1,39 +1,74 @@
 import { Response } from 'express';
-import { db } from '../database/db.js';
+import { pool } from '../database/db.js';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
 
-export function getAuditLogs(req: AuthenticatedRequest, res: Response) {
+export async function getAuditLogs(req: AuthenticatedRequest, res: Response): Promise<void> {
   const { action, entity, user_id, page = '1', limit = '25' } = req.query;
 
-  const state = db.getState();
-  let logs = [...state.audit_logs];
+  try {
+    const conditions: string[] = ['1=1'];
+    const params: any[] = [];
 
-  if (action && action !== 'all') {
-    logs = logs.filter(l => l.action === action);
+    if (action && action !== 'all') {
+      conditions.push('a.action = ?');
+      params.push(action);
+    }
+
+    if (entity && entity !== 'all') {
+      conditions.push('a.entity = ?');
+      params.push(entity);
+    }
+
+    if (user_id && user_id !== 'all') {
+      conditions.push('a.user_id = ?');
+      params.push(parseInt(user_id as string, 10));
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    // Count total
+    const [countRows] = await pool.query<any[]>(
+      `SELECT COUNT(*) AS total FROM audit_logs a WHERE ${whereClause}`,
+      params
+    );
+    const total = Number(countRows[0]?.total) || 0;
+
+    // Pagination
+    const p = Math.max(1, parseInt(page as string, 10));
+    const l = Math.max(1, parseInt(limit as string, 10));
+    const offset = (p - 1) * l;
+
+    const sql = `
+      SELECT 
+        a.*,
+        COALESCE(u.name, 'System') AS user_name
+      FROM audit_logs a
+      LEFT JOIN users u ON a.user_id = u.id
+      WHERE ${whereClause}
+      ORDER BY a.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const [rows] = await pool.query<any[]>(sql, [...params, l, offset]);
+
+    const formatted = rows.map(r => ({
+      ...r,
+      old_data: typeof r.old_data === 'string' ? JSON.parse(r.old_data) : r.old_data,
+      new_data: typeof r.new_data === 'string' ? JSON.parse(r.new_data) : r.new_data,
+    }));
+
+    res.json({
+      success: true,
+      data: formatted,
+      meta: {
+        page: p,
+        limit: l,
+        total,
+        total_pages: Math.ceil(total / l),
+      },
+    });
+  } catch (err: any) {
+    console.error('[Audit getAuditLogs error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memuat log audit.' });
   }
-  if (entity && entity !== 'all') {
-    logs = logs.filter(l => l.entity === entity);
-  }
-  if (user_id && user_id !== 'all') {
-    logs = logs.filter(l => l.user_id === parseInt(user_id as string, 10));
-  }
-
-  // Sort latest first
-  logs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-  const p = Math.max(1, parseInt(page as string, 10));
-  const l = Math.max(1, parseInt(limit as string, 10));
-  const total = logs.length;
-  const paginated = logs.slice((p - 1) * l, p * l);
-
-  res.json({
-    success: true,
-    data: paginated,
-    meta: {
-      page: p,
-      limit: l,
-      total,
-      total_pages: Math.ceil(total / l),
-    },
-  });
 }
