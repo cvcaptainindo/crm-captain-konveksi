@@ -1,8 +1,11 @@
 import assert from 'assert';
+import fs from 'fs';
+import path from 'path';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { validateDbConfig, testDbConnection, checkDbHealth } from '../database/db.js';
 import { getJwtSecret } from '../middlewares/auth.middleware.js';
+import { validatePasswordStrength, FORBIDDEN_PASSWORDS, OWNER_EMAIL } from '../../scripts/bootstrap-owner.js';
 import {
   computeNextFollowUp,
   determineFollowUpCategory,
@@ -75,10 +78,145 @@ async function runTestSuite() {
   // ========================================================
   console.log('\nSECTION 2: Authentication & Security Policies');
 
-  await runTest('Owner default password hashes and validates correctly', () => {
-    const hash = bcrypt.hashSync('sholat5waktu', 10);
-    assert.strictEqual(bcrypt.compareSync('sholat5waktu', hash), true);
-    assert.strictEqual(bcrypt.compareSync('wrong_pass', hash), false);
+  await runTest('Audit: Zero hardcoded default passwords in codebase & SQL files', () => {
+    const filesToCheck = [
+      'scripts/bootstrap-owner.ts',
+      'server/database/seeds.sql',
+      'server/database/migration_initial_hostinger.sql',
+    ];
+
+    for (const relPath of filesToCheck) {
+      const fullPath = path.resolve(process.cwd(), relPath);
+      if (fs.existsSync(fullPath)) {
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        assert.strictEqual(
+          content.includes('sholat5waktu'),
+          false,
+          `File ${relPath} must NOT contain hardcoded password string 'sholat5waktu'`
+        );
+        assert.strictEqual(
+          content.includes('DEFAULT_PASSWORD'),
+          false,
+          `File ${relPath} must NOT contain 'DEFAULT_PASSWORD'`
+        );
+      }
+    }
+  });
+
+  await runTest('Audit: Bootstrap script preserves existing Owner password hash without reset', () => {
+    const scriptPath = path.resolve(process.cwd(), 'scripts/bootstrap-owner.ts');
+    const content = fs.readFileSync(scriptPath, 'utf-8');
+
+    // Verify existing user update query does NOT touch password_hash
+    const updateRegex = /UPDATE users SET role = "ADMIN", account_status = "ACTIVE", is_active = TRUE, updated_at = NOW\(\) WHERE id = \?/i;
+    assert.strictEqual(
+      updateRegex.test(content),
+      true,
+      'Bootstrap script must only update role and status, preserving password_hash'
+    );
+    assert.strictEqual(
+      content.includes('SET password_hash'),
+      false,
+      'Bootstrap script must NEVER reset password_hash of existing accounts'
+    );
+  });
+
+  await runTest('Audit: CLI arguments (process.argv) rejected for password input', () => {
+    const scriptPath = path.resolve(process.cwd(), 'scripts/bootstrap-owner.ts');
+    const content = fs.readFileSync(scriptPath, 'utf-8');
+
+    assert.strictEqual(
+      content.includes('process.argv[2]'),
+      false,
+      'Bootstrap script must NOT read passwords from process.argv to prevent process table / shell history leaks'
+    );
+    assert.strictEqual(
+      content.includes('process.argv.length > 2'),
+      true,
+      'Bootstrap script must explicitly detect and reject CLI arguments'
+    );
+  });
+
+  await runTest('Password strength validator enforces minimum 8 chars, complexity, and rejects weak passwords', () => {
+    // Empty
+    assert.strictEqual(validatePasswordStrength('').isValid, false);
+    // Too short (< 8)
+    assert.strictEqual(validatePasswordStrength('Abc1!').isValid, false);
+    // Common / forbidden
+    for (const forbidden of FORBIDDEN_PASSWORDS) {
+      assert.strictEqual(validatePasswordStrength(forbidden).isValid, false);
+    }
+    // Only letters (no number/symbol)
+    assert.strictEqual(validatePasswordStrength('OnlyLettersPassword').isValid, false);
+    // Only numbers (no letter)
+    assert.strictEqual(validatePasswordStrength('1234567890123').isValid, false);
+    // Valid strong password
+    const valid = validatePasswordStrength('Captain2026!Secure');
+    assert.strictEqual(valid.isValid, true);
+    assert.strictEqual(valid.error, undefined);
+  });
+
+  await runTest('BCrypt hashing with cost factor 10 generates valid verifiable hash', () => {
+    const rawPass = 'Captain2026!Secure';
+    const hash = bcrypt.hashSync(rawPass, 10);
+    assert.strictEqual(bcrypt.compareSync(rawPass, hash), true);
+    assert.strictEqual(bcrypt.compareSync('WrongPassword123!', hash), false);
+    assert.strictEqual(hash.startsWith('$2'), true);
+  });
+
+  await runTest('Audit: Non-TTY environment strictly rejects plain readline to prevent plaintext echo', async () => {
+    const scriptPath = path.resolve(process.cwd(), 'scripts/bootstrap-owner.ts');
+    const content = fs.readFileSync(scriptPath, 'utf-8');
+
+    // Verify readline is not used as a fallback for password input
+    assert.strictEqual(
+      content.includes('readline.createInterface'),
+      false,
+      'Script must NOT use readline.createInterface for password input (characters would be visible)'
+    );
+    assert.strictEqual(
+      content.includes('!process.stdin.isTTY'),
+      true,
+      'Script must verify process.stdin.isTTY before attempting interactive password input'
+    );
+    assert.strictEqual(
+      content.includes('OWNER_PASSWORD'),
+      true,
+      'Script must instruct user to provide temporary OWNER_PASSWORD environment variable for non-TTY environments'
+    );
+  });
+
+  await runTest('Audit: seeds.sql uses non-destructive ON DUPLICATE KEY UPDATE id = id', () => {
+    const seedsPath = path.resolve(process.cwd(), 'server/database/seeds.sql');
+    const content = fs.readFileSync(seedsPath, 'utf-8');
+
+    // Verify seeds do NOT overwrite label, color_code, or interval_days on duplicate
+    assert.strictEqual(
+      content.includes('label = VALUES(label)'),
+      false,
+      'seeds.sql must NOT overwrite custom customer status labels'
+    );
+    assert.strictEqual(
+      content.includes('interval_days = VALUES(interval_days)'),
+      false,
+      'seeds.sql must NOT overwrite custom follow-up interval days'
+    );
+    assert.strictEqual(
+      content.includes('ON DUPLICATE KEY UPDATE id = id'),
+      true,
+      'seeds.sql must use safe ON DUPLICATE KEY UPDATE id = id to preserve existing configurations'
+    );
+  });
+
+  await runTest('Audit: Database connection pool is properly closed in bootstrap finally block', () => {
+    const scriptPath = path.resolve(process.cwd(), 'scripts/bootstrap-owner.ts');
+    const content = fs.readFileSync(scriptPath, 'utf-8');
+
+    assert.strictEqual(
+      content.includes('pool.end()'),
+      true,
+      'Bootstrap script must call pool.end() to release database connection sockets cleanly'
+    );
   });
 
   await runTest('JWT token signing and payload extraction with expiration', () => {

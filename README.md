@@ -8,7 +8,7 @@ Dirancang untuk memastikan tidak ada prospek maupun pelanggan lama yang terlupak
 ## 🛡️ Akun Administrator Resmi
 
 - **Email**: `cvcaptainindo@gmail.com`
-- **Password**: `sholat5waktu`
+- **Password**: Ditetapkan saat inisialisasi akun melalui skrip secure bootstrap (tanpa default password).
 - **Hak Akses**: Super Admin (Kelola pelanggan, persetujuan sales, aturan follow-up, template WA, recycle bin, audit log, dan ekspor data).
 
 *(Akun tim sales baru dapat mendaftar langsung lewat form Registrasi Sales di halaman Login dan menunggu persetujuan Admin).*

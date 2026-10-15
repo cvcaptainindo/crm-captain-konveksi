@@ -5,14 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js && esbuild scripts/bootstrap-owner.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/bootstrap-owner.js",
     "build:client": "vite build",
     "build:server": "esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
     "start": "NODE_ENV=production node dist/server.js",
     "start:tsx": "NODE_ENV=production tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "bootstrap:owner": "tsx scripts/bootstrap-owner.ts",
+    "bootstrap:owner": "node dist/bootstrap-owner.js",
+    "bootstrap:owner:prod": "NODE_ENV=production node dist/bootstrap-owner.js",
+    "bootstrap:owner:dev": "tsx scripts/bootstrap-owner.ts",
     "test": "tsx server/tests/run-tests.ts",
     "lint": "tsc --noEmit"
   },
