@@ -1,11 +1,13 @@
 import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
+import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { validateDbConfig, testDbConnection, checkDbHealth } from '../database/db.js';
 import { getJwtSecret } from '../middlewares/auth.middleware.js';
-import { validatePasswordStrength, FORBIDDEN_PASSWORDS, OWNER_EMAIL } from '../../scripts/bootstrap-owner.js';
+import { validatePasswordStrength, FORBIDDEN_PASSWORDS, OWNER_EMAIL, promptHiddenPassword } from '../../scripts/bootstrap-owner.js';
 import {
   computeNextFollowUp,
   determineFollowUpCategory,
@@ -216,6 +218,315 @@ async function runTestSuite() {
       content.includes('pool.end()'),
       true,
       'Bootstrap script must call pool.end() to release database connection sockets cleanly'
+    );
+  });
+
+  // ========================================================
+  // TTY INTERACTIVE PROMPT AUTOMATED TESTS
+  // ========================================================
+
+  function createMockTtyStream() {
+    const stream = new EventEmitter() as any;
+    stream.isTTY = true;
+    stream.rawMode = false;
+    stream.paused = false;
+    stream.setRawMode = (mode: boolean) => {
+      stream.rawMode = mode;
+    };
+    stream.pause = () => {
+      stream.paused = true;
+    };
+    stream.resume = () => {
+      stream.paused = false;
+    };
+    stream.setEncoding = () => {};
+    stream.read = () => null;
+    return stream;
+  }
+
+  function createMockOutputStream() {
+    let output = '';
+    return {
+      write: (str: string) => {
+        output += str;
+        return true;
+      },
+      getOutput: () => output,
+      clear: () => {
+        output = '';
+      },
+    };
+  }
+
+  await runTest('TTY Prompt: Normal password input with hidden asterisk echo and raw mode restoration', async () => {
+    const mockInput = createMockTtyStream();
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: mockInput, output: mockOutput });
+
+    assert.strictEqual(mockInput.rawMode, true, 'Raw mode must be enabled when prompt is active');
+    mockInput.emit('data', 'Captain2026!\r');
+    const result = await promise;
+
+    assert.strictEqual(result, 'Captain2026!');
+    assert.strictEqual(mockOutput.getOutput(), 'Password: ' + '*'.repeat(12) + '\n');
+    assert.strictEqual(mockInput.rawMode, false, 'Raw mode must be restored to false on finish');
+    assert.strictEqual(mockOutput.getOutput().includes('Captain2026!'), false, 'Password must never be echoed in plaintext');
+  });
+
+  await runTest('TTY Prompt: Confirmation mismatch between two prompts is accurately detected', async () => {
+    const mockInput1 = createMockTtyStream();
+    const mockOutput1 = createMockOutputStream();
+    const p1 = promptHiddenPassword('Password Baru: ', { input: mockInput1, output: mockOutput1 });
+    mockInput1.emit('data', 'PasswordPertama123!\r');
+    const pass1 = await p1;
+
+    const mockInput2 = createMockTtyStream();
+    const mockOutput2 = createMockOutputStream();
+    const p2 = promptHiddenPassword('Konfirmasi Password: ', { input: mockInput2, output: mockOutput2 });
+    mockInput2.emit('data', 'PasswordKeduaBeda456!\r');
+    const pass2 = await p2;
+
+    assert.notStrictEqual(pass1, pass2, 'Mismatched passwords must not be equal');
+  });
+
+  await runTest('TTY Prompt: Backspace (\\x7f and \\x08) deletes characters and updates visual output', async () => {
+    const mockInput = createMockTtyStream();
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: mockInput, output: mockOutput });
+
+    // Type 'Capta'
+    mockInput.emit('data', 'Capta');
+    // Backspace 1x with \x7f
+    mockInput.emit('data', '\x7f');
+    // Backspace 1x with \x08
+    mockInput.emit('data', '\x08');
+    // Type 'tain2026!\r'
+    mockInput.emit('data', 'tain2026!\r');
+
+    const result = await promise;
+    // 'Capta' -> backspace 2x -> 'Cap' + 'tain2026!' -> 'Captain2026!'
+    assert.strictEqual(result, 'Captain2026!');
+    // Verify \b \b visual backspace was written to output
+    assert.strictEqual(mockOutput.getOutput().includes('\b \b'), true);
+  });
+
+  await runTest('TTY Prompt: Enter handling with CRLF (\\r\\n) and buffer draining without character leakage', async () => {
+    const mockInput = createMockTtyStream();
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: mockInput, output: mockOutput });
+
+    // Send password ending with CRLF \r\n
+    mockInput.emit('data', 'SecurePass123!\r\n');
+    const result = await promise;
+
+    assert.strictEqual(result, 'SecurePass123!');
+    assert.strictEqual(mockInput.rawMode, false);
+  });
+
+  await runTest('TTY Prompt: ANSI escape sequences and SSH terminal queries are filtered without echoing asterisks', async () => {
+    const mockInput = createMockTtyStream();
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: mockInput, output: mockOutput });
+
+    // Simulate terminal emulator handshake queries (Hostinger SSH / PuTTY / xterm)
+    // 1. Device Attributes query response: \x1b[?1;2c
+    // 2. Window Focus In event: \x1b[I
+    // 3. Arrow Up key: \x1b[A
+    // 4. Cursor position response: \x1b[24;80R
+    mockInput.emit('data', '\x1b[?1;2c');
+    mockInput.emit('data', '\x1b[I');
+    mockInput.emit('data', '\x1b[A');
+    mockInput.emit('data', '\x1b[24;80R');
+    // User types actual password
+    mockInput.emit('data', 'RealSecret99!\r');
+
+    const result = await promise;
+    assert.strictEqual(result, 'RealSecret99!', 'Password must NOT contain any ANSI escape bytes');
+    // Output must only contain the prompt, 13 asterisks for RealSecret99!, and newline
+    assert.strictEqual(
+      mockOutput.getOutput(),
+      'Password: ' + '*'.repeat(13) + '\n',
+      'No asterisks should be echoed for terminal escape sequences'
+    );
+  });
+
+  await runTest('TTY Prompt: Ctrl+C (\\u0003) cancels cleanly with USER_CANCELLED and restores raw mode', async () => {
+    const mockInput = createMockTtyStream();
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: mockInput, output: mockOutput });
+
+    mockInput.emit('data', 'Partial\x03');
+    await assert.rejects(
+      promise,
+      (err: any) => err.message === 'USER_CANCELLED',
+      'Ctrl+C must cleanly reject with USER_CANCELLED'
+    );
+    assert.strictEqual(mockInput.rawMode, false, 'Raw mode must be restored even upon cancellation');
+  });
+
+  await runTest('TTY Prompt: Ctrl+U (\\x15) clears whole input line and visual asterisks', async () => {
+    const mockInput = createMockTtyStream();
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: mockInput, output: mockOutput });
+
+    // Type mistake, clear line with \x15, then type correct password
+    mockInput.emit('data', 'MistakeTypo');
+    mockInput.emit('data', '\x15');
+    mockInput.emit('data', 'CorrectPass123!\r');
+
+    const result = await promise;
+    assert.strictEqual(result, 'CorrectPass123!');
+  });
+
+  await runTest('TTY Prompt: Real Node.js PassThrough stream handles typing and raw mode restoration', async () => {
+    const realStream = new PassThrough() as any;
+    realStream.isTTY = true;
+    realStream.rawMode = false;
+    realStream.setRawMode = (mode: boolean) => {
+      realStream.rawMode = mode;
+    };
+
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: realStream, output: mockOutput });
+
+    assert.strictEqual(realStream.rawMode, true, 'Real stream raw mode must be true during prompt');
+    realStream.write('Captain2026!\r');
+
+    const result = await promise;
+    assert.strictEqual(result, 'Captain2026!');
+    assert.strictEqual(realStream.rawMode, false, 'Real stream raw mode must be restored to false');
+  });
+
+  await runTest('TTY Prompt: Split CRLF packet between two prompts on same stream prevents empty confirmation failure', async () => {
+    // Simulates the exact Hostinger SSH scenario where \r finishes Prompt 1,
+    // and trailing \n arrives as the first byte of Prompt 2.
+    const sharedStream = new PassThrough() as any;
+    sharedStream.isTTY = true;
+    sharedStream.rawMode = false;
+    sharedStream.setRawMode = (mode: boolean) => {
+      sharedStream.rawMode = mode;
+    };
+
+    const mockOutput1 = createMockOutputStream();
+    const p1 = promptHiddenPassword('Password Baru: ', { input: sharedStream, output: mockOutput1 });
+    // User hits Enter: terminal sends \r in packet 1
+    sharedStream.write('Captain2026!\r');
+    const pass1 = await p1;
+    assert.strictEqual(pass1, 'Captain2026!');
+
+    const mockOutput2 = createMockOutputStream();
+    const p2 = promptHiddenPassword('Konfirmasi: ', { input: sharedStream, output: mockOutput2 });
+
+    // Packet 2 arrives with the trailing \n from the previous Enter key!
+    sharedStream.write('\n');
+
+    // Give event loop time to verify that p2 did NOT resolve with empty string ""
+    let hasResolvedPrematurely = false;
+    p2.then(() => {
+      hasResolvedPrematurely = true;
+    }).catch(() => {});
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.strictEqual(hasResolvedPrematurely, false, 'Prompt 2 must NOT resolve prematurely on orphaned \\n');
+
+    // User enters password confirmation
+    sharedStream.write('Captain2026!\r');
+    const pass2 = await p2;
+
+    assert.strictEqual(pass2, 'Captain2026!');
+    assert.strictEqual(pass1, pass2, 'Confirmation must match when split CRLF is safely ignored');
+  });
+
+  await runTest('TTY Prompt: OSC and terminal query sequences are filtered without leaking or echoing asterisks', async () => {
+    const mockInput = createMockTtyStream();
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: mockInput, output: mockOutput });
+
+    // Terminal sends OSC window title sequence: \x1b]0;cvcaptain@hostinger:~\x07 followed by password
+    mockInput.emit('data', '\x1b]0;cvcaptain@hostinger:~\x07');
+    mockInput.emit('data', 'RealSecret2026!\r');
+
+    const result = await promise;
+    assert.strictEqual(result, 'RealSecret2026!', 'OSC sequence must be completely discarded');
+    assert.strictEqual(
+      mockOutput.getOutput(),
+      'Password: ' + '*'.repeat(15) + '\n',
+      'No asterisks should be echoed for OSC title bytes'
+    );
+  });
+
+  await runTest('TTY Prompt: Stream error triggers listener detachment, raw mode restoration, and rejection', async () => {
+    const mockInput = createMockTtyStream();
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: mockInput, output: mockOutput });
+
+    assert.strictEqual(mockInput.rawMode, true);
+    mockInput.emit('error', new Error('SSH_CONNECTION_RESET'));
+
+    await assert.rejects(
+      promise,
+      (err: any) => err.message === 'SSH_CONNECTION_RESET',
+      'Prompt must reject on stream error'
+    );
+    assert.strictEqual(mockInput.rawMode, false, 'Raw mode must be restored on stream error');
+    assert.strictEqual(mockInput.listenerCount('data'), 0, 'Data listener must be detached on stream error');
+  });
+
+  await runTest('TTY Prompt: Stream unexpected EOF / end triggers cleanup and raw mode restoration', async () => {
+    const realStream = new PassThrough() as any;
+    realStream.isTTY = true;
+    realStream.rawMode = false;
+    realStream.setRawMode = (mode: boolean) => {
+      realStream.rawMode = mode;
+    };
+
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: realStream, output: mockOutput });
+
+    assert.strictEqual(realStream.rawMode, true);
+    realStream.end();
+
+    await assert.rejects(
+      promise,
+      (err: any) => err.message === 'STREAM_ENDED_BEFORE_INPUT',
+      'Prompt must reject if stream closes before password is typed'
+    );
+    assert.strictEqual(realStream.rawMode, false, 'Raw mode must be restored on stream end');
+  });
+
+  await runTest('TTY Prompt: Valid fast-typed or pre-buffered input is fully preserved without unsafe stream draining', async () => {
+    const realStream = new PassThrough() as any;
+    realStream.isTTY = true;
+    realStream.rawMode = false;
+    realStream.setRawMode = (mode: boolean) => {
+      realStream.rawMode = mode;
+    };
+
+    // Pre-write data into buffer before prompt initializes (simulates typing ahead or fast input)
+    realStream.write('FastTypedKey123!\r');
+
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: realStream, output: mockOutput });
+
+    const result = await promise;
+    assert.strictEqual(result, 'FastTypedKey123!', 'Fast-typed password must not be dropped by any stream drain');
+    assert.strictEqual(realStream.rawMode, false);
+  });
+
+  await runTest('TTY Prompt: Bracketed paste delimiters (\\x1b[200~ ... \\x1b[201~) are stripped without polluting password', async () => {
+    const mockInput = createMockTtyStream();
+    const mockOutput = createMockOutputStream();
+    const promise = promptHiddenPassword('Password: ', { input: mockInput, output: mockOutput });
+
+    // Terminal sends bracketed paste sequence: \x1b[200~ followed by pasted text followed by \x1b[201~
+    mockInput.emit('data', '\x1b[200~PastedPass2026!\x1b[201~\r');
+
+    const result = await promise;
+    assert.strictEqual(result, 'PastedPass2026!', 'Pasted password must not contain bracketed paste escape bytes');
+    assert.strictEqual(
+      mockOutput.getOutput(),
+      'Password: ' + '*'.repeat(15) + '\n',
+      'Only 15 asterisks should be echoed for the 15 characters of PastedPass2026!'
     );
   });
 
