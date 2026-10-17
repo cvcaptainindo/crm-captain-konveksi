@@ -19,6 +19,7 @@ import * as XLSX from 'xlsx';
 import { parseTemplate, sanitizeWhatsAppPhone, buildWhatsAppLink } from '../services/templateParser.js';
 import { generateCustomerExport, generateActivityExport, generateTransactionExport, sanitizeSpreadsheetCell } from '../services/exportService.js';
 import { isValidCalendarDate } from '../controllers/transaction.controller.js';
+import { validateTemplateForPreview } from '../controllers/template.controller.js';
 
 interface TestResult {
   name: string;
@@ -1025,33 +1026,137 @@ async function runTestSuite() {
     assert.strictEqual(isValidCalendarDate('2026-10-17'), true, 'Current date must be accepted');
   });
 
-  // Additional C: previewTemplate access control [HANDLER SIMULATION / LOGIC MOCK]
-  await runTest('Check C: previewTemplate enforces soft-delete check and Sales customer ownership', () => {
-    const customers = [
-      { id: 1, name: 'Customer A', assigned_sales_id: 2, deleted_at: null },
-      { id: 2, name: 'Customer B', assigned_sales_id: 3, deleted_at: null },
-      { id: 3, name: 'Customer C', assigned_sales_id: 2, deleted_at: '2026-10-16 10:00:00' },
+  // Additional C: previewTemplate access control & template active status [UNIT TEST & LOGIC MOCK]
+  await runTest('Check C: previewTemplate enforces active template status, existence check, soft-delete check, and Sales customer ownership', () => {
+    // 1. Production helper validateTemplateForPreview tests
+    assert.deepStrictEqual(validateTemplateForPreview(null), {
+      valid: false,
+      status: 404,
+      message: 'Template tidak ditemukan.',
+    }, 'Missing template row must return 404');
+
+    assert.deepStrictEqual(validateTemplateForPreview(undefined), {
+      valid: false,
+      status: 404,
+      message: 'Template tidak ditemukan.',
+    }, 'Undefined template row must return 404');
+
+    assert.deepStrictEqual(validateTemplateForPreview({ content: 'Halo kak', is_active: false }), {
+      valid: false,
+      status: 400,
+      message: 'Template tidak aktif dan tidak dapat digunakan.',
+    }, 'Template with is_active = false must return 400');
+
+    assert.deepStrictEqual(validateTemplateForPreview({ content: 'Halo kak', is_active: 0 }), {
+      valid: false,
+      status: 400,
+      message: 'Template tidak aktif dan tidak dapat digunakan.',
+    }, 'Template with is_active = 0 must return 400');
+
+    assert.deepStrictEqual(validateTemplateForPreview({ content: 'Halo {{nama_customer}}', is_active: true }), {
+      valid: true,
+      content: 'Halo {{nama_customer}}',
+    }, 'Template with is_active = true must be valid');
+
+    assert.deepStrictEqual(validateTemplateForPreview({ content: 'Halo {{nama_customer}}', is_active: 1 }), {
+      valid: true,
+      content: 'Halo {{nama_customer}}',
+    }, 'Template with is_active = 1 must be valid');
+
+    // 2. Full preview flow simulation matching production controller behavior
+    const templates = [
+      { id: 10, content: 'Halo {{nama_customer}}, pesanan {{produk}} siap!', is_active: 1 },
+      { id: 11, content: 'Promo diskon lama!', is_active: 0 },
     ];
 
-    function mockPreviewAccess(customerId: number, user: { id: number; role: string }) {
-      const cust = customers.find(c => c.id === customerId);
-      if (!cust || cust.deleted_at !== null) {
-        return { status: 404, message: 'Customer tidak ditemukan.' };
+    const customers = [
+      { id: 1, name: 'Customer A', company_name: 'PT Maju', pic_name: 'Budi', whatsapp_number: '081234567890', assigned_sales_id: 2, deleted_at: null },
+      { id: 2, name: 'Customer B', company_name: 'CV Makmur', pic_name: 'Siti', whatsapp_number: '081234567891', assigned_sales_id: 3, deleted_at: null },
+      { id: 3, name: 'Customer C', company_name: 'Toko Lama', pic_name: 'Joko', whatsapp_number: '081234567892', assigned_sales_id: 2, deleted_at: '2026-10-16 10:00:00' },
+    ];
+
+    function mockPreviewTemplateHandler(body: { template_id?: any; customer_id?: any; raw_content?: string; custom_product?: string }, user: { id: number; name: string; role: string }) {
+      let content = body.raw_content || '';
+
+      if (body.template_id) {
+        const foundTpl = templates.find(t => t.id === parseInt(body.template_id, 10)) || null;
+        const validation = validateTemplateForPreview(foundTpl);
+        if (!validation.valid) {
+          return { status: validation.status!, success: false, message: validation.message };
+        }
+        content = validation.content || '';
       }
-      if (user.role === 'SALES' && cust.assigned_sales_id !== user.id) {
-        return { status: 403, message: 'Akses ditolak: Customer bukan milik Anda.' };
+
+      let customer: any = null;
+      if (body.customer_id) {
+        const cust = customers.find(c => c.id === parseInt(body.customer_id, 10));
+        if (!cust || cust.deleted_at !== null) {
+          return { status: 404, success: false, message: 'Customer tidak ditemukan.' };
+        }
+        if (user.role === 'SALES' && cust.assigned_sales_id !== user.id) {
+          return { status: 403, success: false, message: 'Akses ditolak: Customer bukan milik Anda.' };
+        }
+        customer = cust;
       }
-      return { status: 200, customer: cust };
+
+      const parsed = parseTemplate(content, {
+        nama_customer: customer?.name || customer?.pic_name || 'Bapak/Ibu',
+        perusahaan: customer?.company_name || '-',
+        nama_sales: user?.name || 'Captain Konveksi',
+        produk: body.custom_product || 'pesanan konveksi',
+      });
+
+      const waLink = customer ? buildWhatsAppLink(customer.whatsapp_number, parsed) : '';
+
+      return {
+        status: 200,
+        success: true,
+        data: {
+          parsed_message: parsed,
+          wa_link: waLink,
+          whatsapp_number: customer?.whatsapp_number || '',
+        },
+      };
     }
 
-    // Owner Sales -> 200
-    assert.strictEqual(mockPreviewAccess(1, { id: 2, role: 'SALES' }).status, 200);
-    // Non-owner Sales -> 403
-    assert.strictEqual(mockPreviewAccess(2, { id: 2, role: 'SALES' }).status, 403);
-    // Deleted Customer -> 404
-    assert.strictEqual(mockPreviewAccess(3, { id: 2, role: 'SALES' }).status, 404);
-    // Admin access to active customer -> 200
-    assert.strictEqual(mockPreviewAccess(2, { id: 1, role: 'ADMIN' }).status, 200);
+    const salesUser = { id: 2, name: 'Sales Agent', role: 'SALES' };
+    const adminUser = { id: 1, name: 'Admin Boss', role: 'ADMIN' };
+
+    // Case 1: Template not found (ID 999) -> 404
+    const resNotFound = mockPreviewTemplateHandler({ template_id: 999, customer_id: 1 }, salesUser);
+    assert.strictEqual(resNotFound.status, 404);
+    assert.strictEqual(resNotFound.message, 'Template tidak ditemukan.');
+
+    // Case 2: Template is inactive (ID 11, is_active: 0) -> 400
+    const resInactive = mockPreviewTemplateHandler({ template_id: 11, customer_id: 1 }, salesUser);
+    assert.strictEqual(resInactive.status, 400);
+    assert.strictEqual(resInactive.message, 'Template tidak aktif dan tidak dapat digunakan.');
+
+    // Case 3: Template is active (ID 10) + owned customer (ID 1) -> 200
+    const resActive = mockPreviewTemplateHandler({ template_id: 10, customer_id: 1, custom_product: 'Kaos Polo' }, salesUser);
+    assert.strictEqual(resActive.status, 200);
+    assert.strictEqual(resActive.data?.parsed_message.includes('Customer A'), true);
+    assert.strictEqual(resActive.data?.parsed_message.includes('Kaos Polo'), true);
+    assert.strictEqual(resActive.data?.wa_link.includes('6281234567890'), true);
+
+    // Case 4: Raw content without template_id -> 200
+    const resRaw = mockPreviewTemplateHandler({ raw_content: 'Halo {{nama_customer}}!', customer_id: 1 }, salesUser);
+    assert.strictEqual(resRaw.status, 200);
+    assert.strictEqual(resRaw.data?.parsed_message, 'Halo Customer A!');
+
+    // Case 5: Deleted customer -> 404
+    const resDeletedCust = mockPreviewTemplateHandler({ template_id: 10, customer_id: 3 }, salesUser);
+    assert.strictEqual(resDeletedCust.status, 404);
+    assert.strictEqual(resDeletedCust.message, 'Customer tidak ditemukan.');
+
+    // Case 6: Non-owner Sales accessing other customer -> 403
+    const resForbidden = mockPreviewTemplateHandler({ template_id: 10, customer_id: 2 }, salesUser);
+    assert.strictEqual(resForbidden.status, 403);
+    assert.strictEqual(resForbidden.message, 'Akses ditolak: Customer bukan milik Anda.');
+
+    // Case 7: Admin accessing any active customer -> 200
+    const resAdmin = mockPreviewTemplateHandler({ template_id: 10, customer_id: 2 }, adminUser);
+    assert.strictEqual(resAdmin.status, 200);
   });
 
   // Additional D: Pagination parser [UNIT TEST - CONTROLLER PAGINATION PARSER]

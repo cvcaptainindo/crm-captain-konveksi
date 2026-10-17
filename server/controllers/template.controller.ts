@@ -152,6 +152,25 @@ export async function deleteTemplate(req: AuthenticatedRequest, res: Response): 
   }
 }
 
+/**
+ * Validates template retrieval result for previewing.
+ * Rejects nonexistent templates (404) and inactive templates (400).
+ */
+export function validateTemplateForPreview(template: { content: string; is_active: boolean | number } | null | undefined): {
+  valid: boolean;
+  status?: number;
+  message?: string;
+  content?: string;
+} {
+  if (!template) {
+    return { valid: false, status: 404, message: 'Template tidak ditemukan.' };
+  }
+  if (!template.is_active) {
+    return { valid: false, status: 400, message: 'Template tidak aktif dan tidak dapat digunakan.' };
+  }
+  return { valid: true, content: template.content };
+}
+
 export async function previewTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
   const { template_id, customer_id, raw_content, custom_product } = req.body;
 
@@ -160,12 +179,15 @@ export async function previewTemplate(req: AuthenticatedRequest, res: Response):
 
     if (template_id) {
       const [tRows] = await pool.query<any[]>(
-        'SELECT content FROM whatsapp_templates WHERE id = ? LIMIT 1',
+        'SELECT content, is_active FROM whatsapp_templates WHERE id = ? LIMIT 1',
         [parseInt(template_id, 10)]
       );
-      if (tRows && tRows.length > 0) {
-        content = tRows[0].content;
+      const validation = validateTemplateForPreview(tRows && tRows.length > 0 ? tRows[0] : null);
+      if (!validation.valid) {
+        res.status(validation.status!).json({ success: false, message: validation.message });
+        return;
       }
+      content = validation.content || '';
     }
 
     let customer: any = null;
