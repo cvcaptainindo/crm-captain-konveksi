@@ -11,8 +11,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = parseInt(process.env.PORT || '3000', 10);
 const isProd = process.env.NODE_ENV === 'production';
+
+function getPort(): number {
+  const portArgIndex = process.argv.indexOf('--port');
+  if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+    return parseInt(process.argv[portArgIndex + 1], 10);
+  }
+  if (process.env.APP_PORT) {
+    return parseInt(process.env.APP_PORT, 10);
+  }
+  // In development, dev server must run on port 3000 (port 8080 is reserved by container ingress/nginx)
+  if (!isProd) {
+    return 3000;
+  }
+  return parseInt(process.env.PORT || '3000', 10);
+}
+
+const PORT = getPort();
 
 app.use(cors());
 app.use(express.json());
@@ -30,8 +46,6 @@ app.get(['/api/health', '/api/v1/health'], async (req, res) => {
     version: '1.0.0',
     database: {
       status: dbHealth.status,
-      host: dbHealth.host,
-      name: dbHealth.database,
       latencyMs: dbHealth.latencyMs,
     },
     timestamp: new Date().toISOString(),

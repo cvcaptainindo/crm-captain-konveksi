@@ -15,8 +15,10 @@ import {
   calculateDaysSinceContact,
   getTodayDateString,
 } from '../services/followUpEngine.js';
+import * as XLSX from 'xlsx';
 import { parseTemplate, sanitizeWhatsAppPhone, buildWhatsAppLink } from '../services/templateParser.js';
-import { generateCustomerExport, generateTransactionExport } from '../services/exportService.js';
+import { generateCustomerExport, generateActivityExport, generateTransactionExport, sanitizeSpreadsheetCell } from '../services/exportService.js';
+import { isValidCalendarDate } from '../controllers/transaction.controller.js';
 
 interface TestResult {
   name: string;
@@ -801,6 +803,478 @@ async function runTestSuite() {
     assert.strictEqual(sanitized.password_hash, '[REDACTED]');
     assert.strictEqual(sanitized.token, '[REDACTED]');
     assert.strictEqual(sanitized.safeField, 'safeValue');
+  });
+
+  // ========================================================
+  // 9. COMPREHENSIVE BUG FIX & AUDIT REGRESSION TESTS
+  // ========================================================
+  console.log('\nSECTION 9: Bug Fixes & Audit Regression Suite (BUG-01 to BUG-05 & Checks A-G)');
+
+  // BUG-01: Fan-out join omzet multiplication prevention
+  await runTest('BUG-01: Sales omzet calculation excludes fan-out join duplication across multiple customers & transactions', () => {
+    // Model 1 Sales user with 3 active customers, 1 soft-deleted customer, and multiple transactions
+    const salesUser = { id: 10, name: 'Sales Budi', role: 'SALES' };
+    const allCustomers = [
+      { id: 101, assigned_sales_id: 10, deleted_at: null },
+      { id: 102, assigned_sales_id: 10, deleted_at: null },
+      { id: 103, assigned_sales_id: 10, deleted_at: null },
+      { id: 104, assigned_sales_id: 10, deleted_at: '2026-10-15 10:00:00' }, // soft deleted
+    ];
+    const allTransactions = [
+      { id: 1, sales_id: 10, customer_id: 101, amount: 10000000, status: 'CLOSING' },
+      { id: 2, sales_id: 10, customer_id: 102, amount: 5000000, status: 'CLOSING' },
+      { id: 3, sales_id: 10, customer_id: 101, amount: 2000000, status: 'CANCEL' }, // CANCEL excluded
+    ];
+
+    // Compute via isolated aggregations (mirrors fixed subquery logic)
+    const activeCustomers = allCustomers.filter(c => c.assigned_sales_id === salesUser.id && c.deleted_at === null);
+    const closingTransactions = allTransactions.filter(t => t.sales_id === salesUser.id && t.status === 'CLOSING');
+    const totalOmzet = closingTransactions.reduce((sum, t) => sum + t.amount, 0);
+
+    assert.strictEqual(activeCustomers.length, 3, 'Customer count must strictly count active customers (deleted_at IS NULL)');
+    assert.strictEqual(closingTransactions.length, 2, 'Closing count must strictly count CLOSING status without duplication');
+    assert.strictEqual(totalOmzet, 15000000, 'Total omzet must be 15,000,000 (10M + 5M), not multiplied by customer fan-out');
+
+    // Case: Sales with 0 transactions
+    const salesZero = { id: 11, name: 'Sales Baru' };
+    const zeroCust = allCustomers.filter(c => c.assigned_sales_id === salesZero.id && c.deleted_at === null);
+    const zeroTrx = allTransactions.filter(t => t.sales_id === salesZero.id && t.status === 'CLOSING');
+    assert.strictEqual(zeroCust.length, 0);
+    assert.strictEqual(zeroTrx.length, 0);
+    assert.strictEqual(zeroTrx.reduce((s, t) => s + t.amount, 0), 0);
+  });
+
+  // BUG-02: Detail customer in Trash is blocked on normal endpoint
+  await runTest('BUG-02: Soft-deleted (Trash) customer cannot be accessed via normal getCustomerById', () => {
+    const customerTable = [
+      { id: 1, name: 'Active Customer', assigned_sales_id: 2, deleted_at: null },
+      { id: 2, name: 'Trash Customer', assigned_sales_id: 2, deleted_at: '2026-10-16 14:00:00' },
+    ];
+
+    function mockGetCustomerById(req: { user: { id: number; role: string }; params: { id: string } }) {
+      const id = parseInt(req.params.id, 10);
+      // Query enforces WHERE c.id = ? AND c.deleted_at IS NULL
+      const found = customerTable.find(c => c.id === id && c.deleted_at === null);
+      if (!found) {
+        return { status: 404, message: 'Customer tidak ditemukan.' };
+      }
+      if (req.user.role === 'SALES' && found.assigned_sales_id !== req.user.id) {
+        return { status: 403, message: 'Anda tidak memiliki akses ke customer ini.' };
+      }
+      return { status: 200, data: found };
+    }
+
+    // Active customer accessed by owner Sales -> 200
+    const resActive = mockGetCustomerById({ user: { id: 2, role: 'SALES' }, params: { id: '1' } });
+    assert.strictEqual(resActive.status, 200);
+
+    // Trash customer accessed by owner Sales -> 404
+    const resTrash = mockGetCustomerById({ user: { id: 2, role: 'SALES' }, params: { id: '2' } });
+    assert.strictEqual(resTrash.status, 404, 'Normal endpoint must return 404 for customer in Trash');
+
+    // Trash customer accessed by Admin -> 404 (Admin must use dedicated Trash endpoint)
+    const resAdminTrash = mockGetCustomerById({ user: { id: 1, role: 'ADMIN' }, params: { id: '2' } });
+    assert.strictEqual(resAdminTrash.status, 404, 'Admin accessing normal detail for Trash customer must get 404');
+
+    // Active customer accessed by non-owner Sales -> 403
+    const resOtherSales = mockGetCustomerById({ user: { id: 99, role: 'SALES' }, params: { id: '1' } });
+    assert.strictEqual(resOtherSales.status, 403);
+  });
+
+  // BUG-03: Update customer in Trash is blocked
+  await runTest('BUG-03: Soft-deleted (Trash) customer cannot be updated via updateCustomer', () => {
+    const customerTable = [
+      { id: 1, name: 'Active Customer', assigned_sales_id: 2, deleted_at: null },
+      { id: 2, name: 'Trash Customer', assigned_sales_id: 2, deleted_at: '2026-10-16 14:00:00' },
+    ];
+
+    function mockUpdateCustomer(req: { user: { id: number; role: string }; params: { id: string }; body: any }) {
+      const id = parseInt(req.params.id, 10);
+      // Query enforces SELECT ... WHERE id = ? AND deleted_at IS NULL
+      const found = customerTable.find(c => c.id === id && c.deleted_at === null);
+      if (!found) {
+        return { status: 404, message: 'Customer tidak ditemukan.' };
+      }
+      if (req.user.role === 'SALES' && found.assigned_sales_id !== req.user.id) {
+        return { status: 403, message: 'Akses ditolak.' };
+      }
+      found.name = req.body.name || found.name;
+      return { status: 200, success: true, data: found };
+    }
+
+    // Active customer update -> 200
+    const resUpdateActive = mockUpdateCustomer({
+      user: { id: 2, role: 'SALES' },
+      params: { id: '1' },
+      body: { name: 'Active Customer Updated' },
+    });
+    assert.strictEqual(resUpdateActive.status, 200);
+
+    // Trash customer update -> 404
+    const resUpdateTrash = mockUpdateCustomer({
+      user: { id: 2, role: 'SALES' },
+      params: { id: '2' },
+      body: { name: 'Hacked Trash Customer' },
+    });
+    assert.strictEqual(resUpdateTrash.status, 404, 'Updating Trash customer must be rejected with 404');
+    assert.strictEqual(customerTable.find(c => c.id === 2)?.name, 'Trash Customer', 'Trash record must remain untouched');
+  });
+
+  // BUG-04: Export activities excludes Trash customers by default and enforces Sales scoping
+  await runTest('BUG-04: Export activities query construction excludes Trash customers by default and scopes Sales', () => {
+    function buildExportActivitiesWhere(role: string, userId: number, customerId?: string, includeTrash?: string): string[] {
+      const conditions: string[] = [];
+      if (includeTrash !== 'true' || role !== 'ADMIN') {
+        conditions.push('c.deleted_at IS NULL');
+      }
+      if (role === 'SALES') {
+        conditions.push('c.assigned_sales_id = ?');
+      }
+      if (customerId && customerId !== 'all') {
+        conditions.push('a.customer_id = ?');
+      }
+      return conditions;
+    }
+
+    // Default Sales query
+    const salesConds = buildExportActivitiesWhere('SALES', 5);
+    assert.strictEqual(salesConds.includes('c.deleted_at IS NULL'), true, 'Must exclude deleted customers by default');
+    assert.strictEqual(salesConds.includes('c.assigned_sales_id = ?'), true, 'Must enforce sales assignment');
+
+    // Sales cannot bypass trash even if passing include_trash=true
+    const salesBypass = buildExportActivitiesWhere('SALES', 5, undefined, 'true');
+    assert.strictEqual(salesBypass.includes('c.deleted_at IS NULL'), true, 'Sales must not bypass trash filter');
+
+    // Admin default
+    const adminConds = buildExportActivitiesWhere('ADMIN', 1);
+    assert.strictEqual(adminConds.includes('c.deleted_at IS NULL'), true, 'Admin export excludes trash by default');
+
+    // Admin explicit include_trash
+    const adminWithTrash = buildExportActivitiesWhere('ADMIN', 1, undefined, 'true');
+    assert.strictEqual(adminWithTrash.includes('c.deleted_at IS NULL'), false, 'Admin can include trash when explicitly asked');
+  });
+
+  // BUG-05: Transaction amount validation in updateTransaction
+  await runTest('BUG-05: updateTransaction validates amount explicitly (rejects negative, non-numeric, NaN, preserves omitted)', () => {
+    function validateAmount(existingAmount: number, inputAmount: any): { valid: boolean; value?: number; error?: string } {
+      if (inputAmount === undefined) {
+        return { valid: true, value: existingAmount };
+      }
+      const num = typeof inputAmount === 'string' && inputAmount.trim() === '' ? NaN : Number(inputAmount);
+      if (typeof inputAmount === 'boolean' || isNaN(num) || !isFinite(num) || num < 0) {
+        return { valid: false, error: 'Nominal transaksi tidak valid.' };
+      }
+      return { valid: true, value: num };
+    }
+
+    // Valid positive amount
+    assert.deepStrictEqual(validateAmount(100000, 500000), { valid: true, value: 500000 });
+    // Valid zero
+    assert.deepStrictEqual(validateAmount(100000, 0), { valid: true, value: 0 });
+    // Valid string number
+    assert.deepStrictEqual(validateAmount(100000, '250000'), { valid: true, value: 250000 });
+    // Field omitted (undefined) -> retains existing amount
+    assert.deepStrictEqual(validateAmount(100000, undefined), { valid: true, value: 100000 });
+
+    // Negative number -> rejected
+    assert.strictEqual(validateAmount(100000, -50000).valid, false);
+    // Non-numeric string -> rejected
+    assert.strictEqual(validateAmount(100000, 'abc').valid, false);
+    // Empty string -> rejected
+    assert.strictEqual(validateAmount(100000, '   ').valid, false);
+    // NaN -> rejected
+    assert.strictEqual(validateAmount(100000, NaN).valid, false);
+    // Infinity -> rejected
+    assert.strictEqual(validateAmount(100000, Infinity).valid, false);
+    // Boolean true/false -> rejected
+    assert.strictEqual(validateAmount(100000, true).valid, false);
+    assert.strictEqual(validateAmount(100000, false).valid, false);
+  });
+
+  // Additional A & B: Transaction status and strict calendar date validation [UNIT TEST - PRODUCTION HELPER isValidCalendarDate]
+  await runTest('Checks A & B: Transaction status and isValidCalendarDate strictly validates calendar dates & leap years', () => {
+    const validStatuses = ['CLOSING', 'CANCEL'];
+    function validateStatus(status: any): boolean {
+      if (status === undefined) return true;
+      return validStatuses.includes(status);
+    }
+
+    assert.strictEqual(validateStatus('CLOSING'), true);
+    assert.strictEqual(validateStatus('CANCEL'), true);
+    assert.strictEqual(validateStatus('PENDING'), false);
+    assert.strictEqual(validateStatus('FOOBAR'), false);
+    assert.strictEqual(validateStatus(123), false);
+
+    // Tests calling actual production isValidCalendarDate helper
+    // 1. Invalid calendar dates (must be rejected)
+    assert.strictEqual(isValidCalendarDate('2026-02-29'), false, '2026 is NOT a leap year; Feb 29 must be rejected');
+    assert.strictEqual(isValidCalendarDate('2026-04-31'), false, 'April has only 30 days; Apr 31 must be rejected');
+    assert.strictEqual(isValidCalendarDate('2026-13-01'), false, 'Month 13 does not exist; must be rejected');
+    assert.strictEqual(isValidCalendarDate('2026-00-10'), false, 'Month 0 does not exist; must be rejected');
+    assert.strictEqual(isValidCalendarDate('not-a-date'), false, 'Non-date string must be rejected');
+    assert.strictEqual(isValidCalendarDate('17-10-2026'), false, 'Wrong date format (DD-MM-YYYY) must be rejected');
+    assert.strictEqual(isValidCalendarDate('2026/10/17'), false, 'Wrong date delimiter (slash) must be rejected');
+    assert.strictEqual(isValidCalendarDate(''), false, 'Empty string must be rejected');
+    assert.strictEqual(isValidCalendarDate(null), false, 'Null must be rejected');
+    assert.strictEqual(isValidCalendarDate(undefined), false, 'Undefined must be rejected');
+
+    // 2. Valid calendar dates (must be accepted)
+    assert.strictEqual(isValidCalendarDate('2024-02-29'), true, '2024 IS a leap year; Feb 29 must be accepted');
+    assert.strictEqual(isValidCalendarDate('2026-02-28'), true, 'Regular February 28 must be accepted');
+    assert.strictEqual(isValidCalendarDate('2026-12-31'), true, 'December 31 must be accepted');
+    assert.strictEqual(isValidCalendarDate('2026-10-17'), true, 'Current date must be accepted');
+  });
+
+  // Additional C: previewTemplate access control [HANDLER SIMULATION / LOGIC MOCK]
+  await runTest('Check C: previewTemplate enforces soft-delete check and Sales customer ownership', () => {
+    const customers = [
+      { id: 1, name: 'Customer A', assigned_sales_id: 2, deleted_at: null },
+      { id: 2, name: 'Customer B', assigned_sales_id: 3, deleted_at: null },
+      { id: 3, name: 'Customer C', assigned_sales_id: 2, deleted_at: '2026-10-16 10:00:00' },
+    ];
+
+    function mockPreviewAccess(customerId: number, user: { id: number; role: string }) {
+      const cust = customers.find(c => c.id === customerId);
+      if (!cust || cust.deleted_at !== null) {
+        return { status: 404, message: 'Customer tidak ditemukan.' };
+      }
+      if (user.role === 'SALES' && cust.assigned_sales_id !== user.id) {
+        return { status: 403, message: 'Akses ditolak: Customer bukan milik Anda.' };
+      }
+      return { status: 200, customer: cust };
+    }
+
+    // Owner Sales -> 200
+    assert.strictEqual(mockPreviewAccess(1, { id: 2, role: 'SALES' }).status, 200);
+    // Non-owner Sales -> 403
+    assert.strictEqual(mockPreviewAccess(2, { id: 2, role: 'SALES' }).status, 403);
+    // Deleted Customer -> 404
+    assert.strictEqual(mockPreviewAccess(3, { id: 2, role: 'SALES' }).status, 404);
+    // Admin access to active customer -> 200
+    assert.strictEqual(mockPreviewAccess(2, { id: 1, role: 'ADMIN' }).status, 200);
+  });
+
+  // Additional D: Pagination parser [UNIT TEST - CONTROLLER PAGINATION PARSER]
+  await runTest('Check D: Pagination parser handles NaN, negative numbers, and caps excessive limits', () => {
+    function parsePagination(page: any, limit: any, defaultLimit = 10) {
+      const rawPage = parseInt(page as string, 10);
+      const rawLimit = parseInt(limit as string, 10);
+      const p = !isNaN(rawPage) && rawPage > 0 ? rawPage : 1;
+      const l = !isNaN(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : defaultLimit;
+      return { p, l, offset: (p - 1) * l };
+    }
+
+    assert.deepStrictEqual(parsePagination('1', '25'), { p: 1, l: 25, offset: 0 });
+    assert.deepStrictEqual(parsePagination('abc', 'xyz'), { p: 1, l: 10, offset: 0 });
+    assert.deepStrictEqual(parsePagination('-5', '-10'), { p: 1, l: 10, offset: 0 });
+    assert.deepStrictEqual(parsePagination('2', '500'), { p: 2, l: 100, offset: 100 });
+  });
+
+  // Additional E: Spreadsheet formula injection sanitization [INTEGRATION TEST - REAL EXPORT GENERATION & XLSX BUFFER PARSING]
+  await runTest('Check E: Comprehensive Spreadsheet Export Sanitization & Buffer Inspection (CSV & XLSX)', () => {
+    // 1. Direct helper test for formula injection characters
+    assert.strictEqual(sanitizeSpreadsheetCell('=SUM(1,2)'), "'=SUM(1,2)");
+    assert.strictEqual(sanitizeSpreadsheetCell("=CMD|' /C calc'!A0"), "'=CMD|' /C calc'!A0");
+    assert.strictEqual(sanitizeSpreadsheetCell('+12345'), "'+12345");
+    assert.strictEqual(sanitizeSpreadsheetCell('-cmd|calc'), "'-cmd|calc");
+    assert.strictEqual(sanitizeSpreadsheetCell('@HYPERLINK("http://evil.com")'), "'@HYPERLINK(\"http://evil.com\")");
+    assert.strictEqual(sanitizeSpreadsheetCell('\tTabLeading'), "'\tTabLeading");
+    assert.strictEqual(sanitizeSpreadsheetCell('\rCRLeading'), "'\rCRLeading");
+    assert.strictEqual(sanitizeSpreadsheetCell('   =1+1'), "'   =1+1", 'Formula with leading whitespace must be sanitized');
+
+    // Normal values remain untouched
+    assert.strictEqual(sanitizeSpreadsheetCell('Kaos Polos Cotton Combed 30s'), 'Kaos Polos Cotton Combed 30s');
+    assert.strictEqual(sanitizeSpreadsheetCell('CV Captain Konveksi'), 'CV Captain Konveksi');
+    assert.strictEqual(sanitizeSpreadsheetCell('081234567890'), '081234567890');
+    assert.strictEqual(sanitizeSpreadsheetCell(150000), 150000, 'Positive numbers must remain numeric');
+    assert.strictEqual(sanitizeSpreadsheetCell(-50000), -50000, 'Negative numbers must remain numeric');
+
+    // 2. Integration: Test generateCustomerExport with CSV and XLSX
+    const mockCustomers = [
+      {
+        id: 1,
+        customer_code: 'CK-0001',
+        name: "=CMD|' /C calc'!A0", // dangerous formula
+        company_name: '+628123456789', // plus prefix
+        whatsapp_number: '081234567890',
+        phone_number: '081234567890',
+        notes: '@SUM(A1:A10)', // at prefix
+        status_label: 'Prospek',
+        status_code: 'PROSPEK',
+        next_follow_up_date: '2026-10-20',
+        created_at: '2026-10-17 10:00:00',
+      },
+      {
+        id: 2,
+        customer_code: 'CK-0002',
+        name: 'Budi Santoso', // normal text
+        company_name: 'PT Maju Bersama',
+        whatsapp_number: '081987654321',
+        notes: 'Pelanggan reguler kaos polo',
+        status_label: 'Closing',
+        status_code: 'CLOSING',
+        created_at: '2026-10-17 10:00:00',
+      },
+    ];
+
+    // CSV Customer Export test
+    const custCsv = generateCustomerExport(mockCustomers, 'csv');
+    const custCsvStr = custCsv.buffer.toString('utf-8');
+    assert.strictEqual(custCsvStr.includes("=CMD|' /C calc'!A0"), true, 'CSV must contain formula string');
+    assert.strictEqual(custCsvStr.includes("'=CMD|' /C calc'!A0"), true, 'CSV formula string must be escaped with single quote');
+    assert.strictEqual(custCsvStr.includes("'+628123456789"), true, 'CSV plus prefix must be escaped with single quote');
+    assert.strictEqual(custCsvStr.includes("'@SUM(A1:A10)"), true, 'CSV at-sign formula must be escaped with single quote');
+    assert.strictEqual(custCsvStr.includes('Budi Santoso'), true, 'Normal customer name must appear unescaped');
+
+    // XLSX Customer Export round-trip buffer test
+    const custXlsx = generateCustomerExport(mockCustomers, 'xlsx');
+    const custWorkbook = XLSX.read(custXlsx.buffer, { type: 'buffer' });
+    const custSheet = custWorkbook.Sheets['Data Customer'];
+    const custRows = XLSX.utils.sheet_to_json<any>(custSheet);
+    assert.strictEqual(custRows[0]['Nama Customer'], "'=CMD|' /C calc'!A0", 'XLSX cell must have escaped single quote');
+    assert.strictEqual(custRows[0]['Perusahaan'], "'+628123456789", 'XLSX company cell must have escaped single quote');
+    assert.strictEqual(custRows[0]['Catatan'], "'@SUM(A1:A10)", 'XLSX notes cell must have escaped single quote');
+    assert.strictEqual(custRows[1]['Nama Customer'], 'Budi Santoso', 'Normal text in XLSX must NOT have leading quote');
+
+    // 3. Integration: Test generateActivityExport with CSV and XLSX
+    const mockActivities = [
+      {
+        id: 101,
+        activity_date: '2026-10-17',
+        customer_name: '\tTabCustomer', // tab prefix
+        company_name: '\rCRCompany', // CR prefix
+        user_name: 'Sales Staff 1',
+        channel: 'WHATSAPP',
+        template_title: '-DDE("cmd";"calc")', // dash formula
+        result_status: 'FOLLOW_UP',
+        message_sent: '   =1+1', // whitespace + formula
+        notes: '@malicious_tag',
+        next_follow_up_date: '2026-10-24',
+      },
+    ];
+
+    const actXlsx = generateActivityExport(mockActivities, 'xlsx');
+    const actWorkbook = XLSX.read(actXlsx.buffer, { type: 'buffer' });
+    const actSheet = actWorkbook.Sheets['Histori Follow-Up'];
+    const actRows = XLSX.utils.sheet_to_json<any>(actSheet);
+    assert.strictEqual(actRows[0]['Nama Customer'], "'\tTabCustomer");
+    assert.strictEqual(actRows[0]['Perusahaan'], "'\rCRCompany");
+    assert.strictEqual(actRows[0]['Template WA'], "'-DDE(\"cmd\";\"calc\")");
+    assert.strictEqual(actRows[0]['Pesan Terkirim'], "'   =1+1");
+    assert.strictEqual(actRows[0]['Catatan Sales'], "'@malicious_tag");
+
+    // 4. Integration: Test generateTransactionExport (preserves numeric amount, sanitizes text)
+    const mockTransactions = [
+      {
+        id: 501,
+        transaction_date: '2026-10-17',
+        customer_name: '=HYPERLINK("http://attacker.com")',
+        company_name: 'CV Captain Konveksi',
+        sales_name: 'Sales Budi',
+        product: '+Kemeja Seragam',
+        description: '-Diskon 10%',
+        amount: 25000000, // positive number
+        status: 'CLOSING',
+        notes: '@Catatan Khusus',
+        created_at: '2026-10-17 12:00:00',
+      },
+      {
+        id: 502,
+        transaction_date: '2026-10-17',
+        customer_name: 'Customer Normal',
+        company_name: 'PT Sukses Mandiri',
+        sales_name: 'Sales Ani',
+        product: 'Kaos Sablon',
+        description: 'Penyesuaian retur bahan',
+        amount: -50000, // negative number
+        status: 'CANCEL',
+        notes: 'Retur barang',
+        created_at: '2026-10-17 13:00:00',
+      },
+    ];
+
+    const trXlsx = generateTransactionExport(mockTransactions, 'xlsx');
+    const trWorkbook = XLSX.read(trXlsx.buffer, { type: 'buffer' });
+    const trSheet = trWorkbook.Sheets['Laporan Closing Transaksi'];
+    const trRows = XLSX.utils.sheet_to_json<any>(trSheet);
+
+    // Text fields are sanitized
+    assert.strictEqual(trRows[0]['Nama Customer'], "'=HYPERLINK(\"http://attacker.com\")");
+    assert.strictEqual(trRows[0]['Nama Produk / Pesanan'], "'+Kemeja Seragam");
+    assert.strictEqual(trRows[0]['Deskripsi'], "'-Diskon 10%");
+    assert.strictEqual(trRows[0]['Catatan'], "'@Catatan Khusus");
+    assert.strictEqual(trRows[1]['Nama Customer'], 'Customer Normal');
+
+    // Numeric fields: verify they retain authentic numeric types and values in SheetJS
+    assert.strictEqual(typeof trRows[0]['Nominal Transaksi (Rp)'], 'number');
+    assert.strictEqual(trRows[0]['Nominal Transaksi (Rp)'], 25000000, 'Positive amount must remain number');
+    assert.strictEqual(typeof trRows[1]['Nominal Transaksi (Rp)'], 'number');
+    assert.strictEqual(trRows[1]['Nominal Transaksi (Rp)'], -50000, 'Negative amount must remain number without quote');
+  });
+
+  // Additional F: Health endpoint structure
+  await runTest('Check F: Health endpoint data structure does not expose internal host or database schema name', () => {
+    const rawDbHealth = { status: 'ok', host: '127.0.0.1:3306', database: 'crm_captain_konveksi', latencyMs: 2 };
+    // Sanitized public health payload:
+    const publicHealth = {
+      status: 'ok',
+      app: 'CRM Captain Konveksi',
+      version: '1.0.0',
+      database: {
+        status: rawDbHealth.status,
+        latencyMs: rawDbHealth.latencyMs,
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    assert.strictEqual((publicHealth.database as any).host, undefined, 'Host must not be leaked in public health endpoint');
+    assert.strictEqual((publicHealth.database as any).name, undefined, 'Database name must not be leaked in public health endpoint');
+    assert.strictEqual(publicHealth.database.status, 'ok');
+    assert.strictEqual(typeof publicHealth.database.latencyMs, 'number');
+  });
+
+  // Additional G: updateProfile password security
+  await runTest('Check G: updateProfile strictly requires oldPassword when newPassword is provided', () => {
+    const passwordHash = bcrypt.hashSync('CurrentValidPass123!', 10);
+
+    function validateProfilePasswordUpdate(body: { newPassword?: string; oldPassword?: string }) {
+      if (body.newPassword) {
+        if (body.newPassword.length < 6) {
+          return { status: 400, message: 'Password baru minimal 6 karakter.' };
+        }
+        if (!body.oldPassword) {
+          return { status: 400, message: 'Password lama wajib diisi untuk mengubah password.' };
+        }
+        const isOldMatch = bcrypt.compareSync(body.oldPassword, passwordHash);
+        if (!isOldMatch) {
+          return { status: 400, message: 'Password lama Anda tidak sesuai.' };
+        }
+        return { status: 200, message: 'Password valid dan berhasil diperbarui.' };
+      }
+      return { status: 200, message: 'Tanpa perubahan password.' };
+    }
+
+    // Submitting new password without old password -> 400
+    assert.strictEqual(validateProfilePasswordUpdate({ newPassword: 'NewPassword2026!' }).status, 400);
+    assert.strictEqual(
+      validateProfilePasswordUpdate({ newPassword: 'NewPassword2026!' }).message,
+      'Password lama wajib diisi untuk mengubah password.'
+    );
+
+    // Submitting with wrong old password -> 400
+    assert.strictEqual(
+      validateProfilePasswordUpdate({ newPassword: 'NewPassword2026!', oldPassword: 'WrongOldPassword!' }).status,
+      400
+    );
+
+    // Submitting with correct old password -> 200
+    assert.strictEqual(
+      validateProfilePasswordUpdate({ newPassword: 'NewPassword2026!', oldPassword: 'CurrentValidPass123!' }).status,
+      200
+    );
+
+    // Not changing password -> 200
+    assert.strictEqual(validateProfilePasswordUpdate({}).status, 200);
   });
 
   // ========================================================

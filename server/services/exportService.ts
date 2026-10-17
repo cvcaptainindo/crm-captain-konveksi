@@ -2,6 +2,20 @@ import * as XLSX from 'xlsx';
 import { Customer, FollowUpActivity } from '../database/db.js';
 import { calculateDaysSinceContact, determineFollowUpCategory } from './followUpEngine.js';
 
+/**
+ * Sanitizes spreadsheet cell strings to prevent CSV / Spreadsheet Formula Injection (CWE-1236).
+ * Prepends a single quote (') if the string starts with '=', '+', '-', '@', '\t', or '\r'.
+ * Non-string values (numbers, dates, booleans) remain untouched.
+ */
+export function sanitizeSpreadsheetCell(value: any): any {
+  if (typeof value !== 'string') return value;
+  // Detect formula injection triggers (=, +, -, @, tab, CR) even if preceded by whitespace
+  if (/^[\s]*[=+\-@\t\r]/.test(value)) {
+    return `'${value}`;
+  }
+  return value;
+}
+
 export function generateCustomerExport(
   customers: any[],
   format: 'xlsx' | 'csv' = 'xlsx',
@@ -17,22 +31,22 @@ export function generateCustomerExport(
 
     return {
       'Kode Customer': c.customer_code || '-',
-      'Nama Customer': c.name,
-      'Perusahaan': c.company_name || '-',
-      'WhatsApp': c.whatsapp_number,
-      'Telepon': c.phone_number || '-',
-      'Email': c.email || '-',
-      'Kota': c.city || '-',
-      'Alamat': c.address || '-',
-      'PIC Customer': c.pic_name || '-',
-      'Sales PIC': salesName,
+      'Nama Customer': sanitizeSpreadsheetCell(c.name),
+      'Perusahaan': sanitizeSpreadsheetCell(c.company_name || '-'),
+      'WhatsApp': sanitizeSpreadsheetCell(c.whatsapp_number),
+      'Telepon': sanitizeSpreadsheetCell(c.phone_number || '-'),
+      'Email': sanitizeSpreadsheetCell(c.email || '-'),
+      'Kota': sanitizeSpreadsheetCell(c.city || '-'),
+      'Alamat': sanitizeSpreadsheetCell(c.address || '-'),
+      'PIC Customer': sanitizeSpreadsheetCell(c.pic_name || '-'),
+      'Sales PIC': sanitizeSpreadsheetCell(salesName),
       'Status': statusLabel,
       'Status Follow-Up': fuStatus,
       'Kontak Terakhir': c.last_contact_date || '-',
       'Hari Sejak Kontak': `${daysSince} hari`,
       'Jadwal Follow-Up': c.next_follow_up_date || '-',
       'Rule Step': `Step ${c.current_rule_step || 1} ${c.use_custom_rule ? '(Custom)' : '(Default)'}`,
-      'Catatan': c.notes || '-',
+      'Catatan': sanitizeSpreadsheetCell(c.notes || '-'),
       'Dibuat Pada': c.created_at,
     };
   });
@@ -71,14 +85,14 @@ export function generateActivityExport(
   const rows = activities.map(a => ({
     'ID Aktivitas': a.id,
     'Tanggal Aktivitas': a.activity_date,
-    'Nama Customer': a.customer_name || customerMap.get(a.customer_id) || `Customer #${a.customer_id}`,
-    'Perusahaan': a.company_name || companyMap.get(a.customer_id) || '-',
-    'Sales Petugas': a.user_name || userMap.get(a.user_id) || `User #${a.user_id}`,
+    'Nama Customer': sanitizeSpreadsheetCell(a.customer_name || customerMap.get(a.customer_id) || `Customer #${a.customer_id}`),
+    'Perusahaan': sanitizeSpreadsheetCell(a.company_name || companyMap.get(a.customer_id) || '-'),
+    'Sales Petugas': sanitizeSpreadsheetCell(a.user_name || userMap.get(a.user_id) || `User #${a.user_id}`),
     'Channel': a.channel,
-    'Template WA': a.template_title || (a.template_id ? templateMap.get(a.template_id) || '-' : '-'),
+    'Template WA': sanitizeSpreadsheetCell(a.template_title || (a.template_id ? templateMap.get(a.template_id) || '-' : '-')),
     'Hasil / Status': a.result_status,
-    'Pesan Terkirim': a.message_sent || '-',
-    'Catatan Sales': a.notes || '-',
+    'Pesan Terkirim': sanitizeSpreadsheetCell(a.message_sent || '-'),
+    'Catatan Sales': sanitizeSpreadsheetCell(a.notes || '-'),
     'Next Follow-Up': a.next_follow_up_date || '-',
   }));
 
@@ -115,14 +129,14 @@ export function generateTransactionExport(
   const rows = transactions.map(t => ({
     'ID Transaksi': t.id,
     'Tanggal Transaksi': t.transaction_date,
-    'Nama Customer': t.customer_name || customerMap.get(t.customer_id) || `Customer #${t.customer_id}`,
-    'Perusahaan': t.company_name || companyMap.get(t.customer_id) || '-',
-    'Sales PIC': t.sales_name || userMap.get(t.sales_id) || `Sales #${t.sales_id}`,
-    'Nama Produk / Pesanan': t.product,
-    'Deskripsi': t.description || '-',
+    'Nama Customer': sanitizeSpreadsheetCell(t.customer_name || customerMap.get(t.customer_id) || `Customer #${t.customer_id}`),
+    'Perusahaan': sanitizeSpreadsheetCell(t.company_name || companyMap.get(t.customer_id) || '-'),
+    'Sales PIC': sanitizeSpreadsheetCell(t.sales_name || userMap.get(t.sales_id) || `Sales #${t.sales_id}`),
+    'Nama Produk / Pesanan': sanitizeSpreadsheetCell(t.product),
+    'Deskripsi': sanitizeSpreadsheetCell(t.description || '-'),
     'Nominal Transaksi (Rp)': Number(t.amount) || 0,
     'Status': t.status,
-    'Catatan': t.notes || '-',
+    'Catatan': sanitizeSpreadsheetCell(t.notes || '-'),
     'Dicatat Pada': t.created_at,
   }));
 

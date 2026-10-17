@@ -3,6 +3,32 @@ import { pool, withTransaction, Transaction } from '../database/db.js';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
 import { logAudit } from '../services/auditLogger.js';
 
+/**
+ * Strictly validates that an input string is in 'YYYY-MM-DD' format and represents an authentic calendar date.
+ * Rejects nonexistent calendar dates (e.g., '2026-02-29', '2026-04-31', '2026-13-01', '2026-00-10').
+ * Accepts valid dates including leap year days (e.g., '2024-02-29', '2026-02-28', '2026-12-31').
+ */
+export function isValidCalendarDate(dateStr: any): boolean {
+  if (typeof dateStr !== 'string') return false;
+  const trimmed = dateStr.trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return false;
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+
+  const isLeapYear = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+  const daysInMonths = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  if (day > daysInMonths[month - 1]) return false;
+
+  return true;
+}
+
 export async function getTransactions(req: AuthenticatedRequest, res: Response): Promise<void> {
   const {
     customer_id,
@@ -144,10 +170,23 @@ export async function createTransaction(req: AuthenticatedRequest, res: Response
     return;
   }
 
-  const numericAmount = Number(amount);
-  if (isNaN(numericAmount) || numericAmount < 0) {
+  const numericAmount = typeof amount === 'string' && amount.trim() === '' ? NaN : Number(amount);
+  if (typeof amount === 'boolean' || isNaN(numericAmount) || !isFinite(numericAmount) || numericAmount < 0) {
     res.status(400).json({ success: false, message: 'Nominal transaksi harus berupa angka positif.' });
     return;
+  }
+
+  const validStatuses = ['CLOSING', 'CANCEL'];
+  if (status !== undefined && !validStatuses.includes(status)) {
+    res.status(400).json({ success: false, message: 'Status transaksi harus bernilai CLOSING atau CANCEL.' });
+    return;
+  }
+
+  if (transaction_date !== undefined && transaction_date !== null && transaction_date !== '') {
+    if (!isValidCalendarDate(transaction_date)) {
+      res.status(400).json({ success: false, message: 'Format tanggal transaksi tidak valid (gunakan format YYYY-MM-DD yang sah).' });
+      return;
+    }
   }
 
   try {
@@ -168,8 +207,8 @@ export async function createTransaction(req: AuthenticatedRequest, res: Response
     }
 
     const today = new Date().toISOString().split('T')[0];
-    const finalDate = transaction_date || today;
-    const finalStatus = status === 'CANCEL' ? 'CANCEL' : 'CLOSING';
+    const finalDate = transaction_date ? String(transaction_date).trim() : today;
+    const finalStatus = status || 'CLOSING';
 
     const result = await withTransaction(async (conn) => {
       const [insertRes] = await conn.execute<any>(
@@ -260,13 +299,35 @@ export async function updateTransaction(req: AuthenticatedRequest, res: Response
 
     let updatedProduct = product ? product.trim() : trx.product;
     let updatedDesc = description !== undefined ? description.trim() : trx.description;
+
     let updatedAmount = trx.amount;
     if (amount !== undefined) {
-      const num = Number(amount);
-      if (!isNaN(num) && num >= 0) updatedAmount = num;
+      const num = typeof amount === 'string' && amount.trim() === '' ? NaN : Number(amount);
+      if (typeof amount === 'boolean' || isNaN(num) || !isFinite(num) || num < 0) {
+        res.status(400).json({ success: false, message: 'Nominal transaksi tidak valid.' });
+        return;
+      }
+      updatedAmount = num;
     }
-    let updatedStatus = (status === 'CLOSING' || status === 'CANCEL') ? status : trx.status;
-    let updatedDate = transaction_date || trx.transaction_date;
+
+    let updatedStatus = trx.status;
+    if (status !== undefined) {
+      if (!['CLOSING', 'CANCEL'].includes(status)) {
+        res.status(400).json({ success: false, message: 'Status transaksi harus bernilai CLOSING atau CANCEL.' });
+        return;
+      }
+      updatedStatus = status;
+    }
+
+    let updatedDate = trx.transaction_date;
+    if (transaction_date !== undefined && transaction_date !== null && transaction_date !== '') {
+      if (!isValidCalendarDate(transaction_date)) {
+        res.status(400).json({ success: false, message: 'Format tanggal transaksi tidak valid (gunakan format YYYY-MM-DD yang sah).' });
+        return;
+      }
+      updatedDate = String(transaction_date).trim();
+    }
+
     let updatedNotes = notes !== undefined ? notes : trx.notes;
 
     await pool.execute(

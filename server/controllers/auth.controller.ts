@@ -229,12 +229,15 @@ export async function updateProfile(req: AuthenticatedRequest, res: Response): P
         return;
       }
 
-      if (oldPassword) {
-        const isOldMatch = bcrypt.compareSync(oldPassword, currentUser.password_hash);
-        if (!isOldMatch) {
-          res.status(400).json({ success: false, message: 'Password lama Anda tidak sesuai.' });
-          return;
-        }
+      if (!oldPassword) {
+        res.status(400).json({ success: false, message: 'Password lama wajib diisi untuk mengubah password.' });
+        return;
+      }
+
+      const isOldMatch = bcrypt.compareSync(oldPassword, currentUser.password_hash);
+      if (!isOldMatch) {
+        res.status(400).json({ success: false, message: 'Password lama Anda tidak sesuai.' });
+        return;
       }
 
       updatedPasswordHash = bcrypt.hashSync(newPassword, 10);
@@ -300,12 +303,24 @@ export async function getSalesManagementList(req: AuthenticatedRequest, res: Res
     let sql = `
       SELECT 
         u.id, u.name, u.email, u.phone, u.role, u.account_status, u.is_active, u.created_at, u.updated_at,
-        COUNT(DISTINCT CASE WHEN c.deleted_at IS NULL THEN c.id END) AS customer_count,
-        COUNT(DISTINCT CASE WHEN t.status = 'CLOSING' THEN t.id END) AS closing_count,
-        COALESCE(SUM(CASE WHEN t.status = 'CLOSING' THEN t.amount ELSE 0 END), 0) AS total_omzet
+        COALESCE(cust.customer_count, 0) AS customer_count,
+        COALESCE(trx.closing_count, 0) AS closing_count,
+        COALESCE(trx.total_omzet, 0) AS total_omzet
       FROM users u
-      LEFT JOIN customers c ON c.assigned_sales_id = u.id
-      LEFT JOIN transactions t ON t.sales_id = u.id
+      LEFT JOIN (
+        SELECT assigned_sales_id, COUNT(*) AS customer_count
+        FROM customers
+        WHERE deleted_at IS NULL
+        GROUP BY assigned_sales_id
+      ) cust ON cust.assigned_sales_id = u.id
+      LEFT JOIN (
+        SELECT sales_id,
+               COUNT(*) AS closing_count,
+               COALESCE(SUM(amount), 0) AS total_omzet
+        FROM transactions
+        WHERE status = 'CLOSING'
+        GROUP BY sales_id
+      ) trx ON trx.sales_id = u.id
       WHERE u.role = 'SALES'
     `;
     const params: any[] = [];
@@ -315,7 +330,7 @@ export async function getSalesManagementList(req: AuthenticatedRequest, res: Res
       params.push(status);
     }
 
-    sql += ' GROUP BY u.id ORDER BY u.created_at DESC';
+    sql += ' ORDER BY u.created_at DESC';
 
     const [rows] = await pool.query<any[]>(sql, params);
 

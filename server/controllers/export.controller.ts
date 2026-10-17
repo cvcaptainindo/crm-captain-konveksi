@@ -87,11 +87,16 @@ export async function exportCustomers(req: AuthenticatedRequest, res: Response):
 }
 
 export async function exportActivities(req: AuthenticatedRequest, res: Response): Promise<void> {
-  const { format = 'xlsx', customer_id } = req.query;
+  const { format = 'xlsx', customer_id, include_trash } = req.query;
 
   try {
-    const conditions: string[] = ['1=1'];
+    const conditions: string[] = [];
     const params: any[] = [];
+
+    // Filter soft-deleted customers by default to align with exportCustomers
+    if (include_trash !== 'true' || req.user?.role !== 'ADMIN') {
+      conditions.push('c.deleted_at IS NULL');
+    }
 
     if (req.user?.role === 'SALES') {
       conditions.push('c.assigned_sales_id = ?');
@@ -103,7 +108,7 @@ export async function exportActivities(req: AuthenticatedRequest, res: Response)
       params.push(parseInt(customer_id as string, 10));
     }
 
-    const whereClause = conditions.join(' AND ');
+    const whereClause = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
 
     const sql = `
       SELECT 

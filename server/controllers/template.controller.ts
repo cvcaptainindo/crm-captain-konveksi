@@ -171,12 +171,18 @@ export async function previewTemplate(req: AuthenticatedRequest, res: Response):
     let customer: any = null;
     if (customer_id) {
       const [cRows] = await pool.query<any[]>(
-        'SELECT name, company_name, pic_name, whatsapp_number FROM customers WHERE id = ? LIMIT 1',
+        'SELECT id, name, company_name, pic_name, whatsapp_number, assigned_sales_id, deleted_at FROM customers WHERE id = ? LIMIT 1',
         [parseInt(customer_id, 10)]
       );
-      if (cRows && cRows.length > 0) {
-        customer = cRows[0];
+      if (!cRows || cRows.length === 0 || cRows[0].deleted_at !== null) {
+        res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
+        return;
       }
+      if (req.user?.role === 'SALES' && cRows[0].assigned_sales_id !== req.user.id) {
+        res.status(403).json({ success: false, message: 'Akses ditolak: Customer bukan milik Anda.' });
+        return;
+      }
+      customer = cRows[0];
     }
 
     const parsed = parseTemplate(content, {

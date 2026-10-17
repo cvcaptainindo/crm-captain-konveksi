@@ -109,11 +109,13 @@ export async function getCustomers(req: AuthenticatedRequest, res: Response): Pr
       return 0;
     });
 
-    // Pagination
-    const p = Math.max(1, parseInt(page as string, 10));
-    const l = Math.max(1, parseInt(limit as string, 10));
+    // Pagination (Robust parsing protecting against NaN, negative values, and unbounded limit)
+    const rawPage = parseInt(page as string, 10);
+    const rawLimit = parseInt(limit as string, 10);
+    const p = !isNaN(rawPage) && rawPage > 0 ? rawPage : 1;
+    const l = !isNaN(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 10;
     const total = filtered.length;
-    const totalPages = Math.ceil(total / l);
+    const totalPages = Math.ceil(total / l) || 1;
     const paginated = filtered.slice((p - 1) * l, p * l);
 
     res.json({
@@ -144,7 +146,7 @@ export async function getCustomerById(req: AuthenticatedRequest, res: Response):
        FROM customers c
        JOIN customer_statuses s ON c.status_id = s.id
        LEFT JOIN users u ON c.assigned_sales_id = u.id
-       WHERE c.id = ? LIMIT 1`,
+       WHERE c.id = ? AND c.deleted_at IS NULL LIMIT 1`,
       [customerId]
     );
 
@@ -336,7 +338,7 @@ export async function updateCustomer(req: AuthenticatedRequest, res: Response): 
   const customerId = parseInt(req.params.id, 10);
 
   try {
-    const [cRows] = await pool.query<any[]>('SELECT * FROM customers WHERE id = ? LIMIT 1', [customerId]);
+    const [cRows] = await pool.query<any[]>('SELECT * FROM customers WHERE id = ? AND deleted_at IS NULL LIMIT 1', [customerId]);
 
     if (!cRows || cRows.length === 0) {
       res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
@@ -394,7 +396,7 @@ export async function updateCustomer(req: AuthenticatedRequest, res: Response): 
           email = ?, address = ?, city = ?, pic_name = ?, assigned_sales_id = ?,
           status_id = ?, notes = ?, use_custom_rule = ?, next_follow_up_date = ?,
           updated_at = NOW()
-        WHERE id = ?`,
+        WHERE id = ? AND deleted_at IS NULL`,
         [
           updatedName,
           updatedCompany,

@@ -33,9 +33,11 @@ export async function getAuditLogs(req: AuthenticatedRequest, res: Response): Pr
     );
     const total = Number(countRows[0]?.total) || 0;
 
-    // Pagination
-    const p = Math.max(1, parseInt(page as string, 10));
-    const l = Math.max(1, parseInt(limit as string, 10));
+    // Pagination (Robust parsing protecting against NaN, negative values, and unbounded limit)
+    const rawPage = parseInt(page as string, 10);
+    const rawLimit = parseInt(limit as string, 10);
+    const p = !isNaN(rawPage) && rawPage > 0 ? rawPage : 1;
+    const l = !isNaN(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 25;
     const offset = (p - 1) * l;
 
     const sql = `
