@@ -20,7 +20,7 @@ import { parseTemplate, sanitizeWhatsAppPhone, buildWhatsAppLink } from '../serv
 import { generateCustomerExport, generateActivityExport, generateTransactionExport, sanitizeSpreadsheetCell } from '../services/exportService.js';
 import { isValidCalendarDate } from '../controllers/transaction.controller.js';
 import { validateTemplateForPreview } from '../controllers/template.controller.js';
-import { validateSignalingMessage } from '../services/screenMonitoringSignaling.js';
+import { validateSignalingMessage, safeRemoveSession } from '../services/screenMonitoringSignaling.js';
 
 interface TestResult {
   name: string;
@@ -637,7 +637,7 @@ async function runTestSuite() {
 
   await runTest('Follow-up category determination matches business rules', () => {
     const today = getTodayDateString();
-    
+
     // Past date -> OVERDUE
     assert.strictEqual(determineFollowUpCategory('2020-01-01', 'PROSPEK'), 'OVERDUE');
     // Today -> DUE_TODAY
@@ -1473,6 +1473,78 @@ async function runTestSuite() {
     const resAnswerValid = validateSignalingMessage(adminUser, { type: 'answer', targetId: 2, sdp: {} });
     assert.strictEqual(resAnswerValid.allowed, true);
     assert.strictEqual(resAnswerValid.forwardTo, 'sales');
+  });
+
+  // Check H5: Reconnection race condition prevention (Sales session identity)
+  await runTest('Check H5: WebSocket session identity verification prevents race conditions on reconnect and stale close', () => {
+    const sessionMap = new Map<number, { ws: any; user: any }>();
+    const mockWsOld: any = { id: 'ws_old_conn_1' };
+    const mockWsNew: any = { id: 'ws_new_conn_2' };
+    const salesUserId = 5;
+
+    // 1. Initial connection with wsOld
+    sessionMap.set(salesUserId, { ws: mockWsOld, user: { id: salesUserId, name: 'Sales Agent' } });
+    assert.strictEqual(sessionMap.has(salesUserId), true);
+    assert.strictEqual(sessionMap.get(salesUserId)?.ws, mockWsOld);
+
+    // 2. Sales reconnects on wsNew before wsOld is closed
+    sessionMap.set(salesUserId, { ws: mockWsNew, user: { id: salesUserId, name: 'Sales Agent' } });
+    assert.strictEqual(sessionMap.get(salesUserId)?.ws, mockWsNew);
+
+    // 3. Late close event arrives from wsOld
+    // safeRemoveSession must detect that map now points to wsNew, and reject deletion!
+    const oldRemoved = safeRemoveSession(sessionMap, salesUserId, mockWsOld);
+    assert.strictEqual(oldRemoved, false, 'Late close event from old connection must NOT remove active reconnected session');
+    assert.strictEqual(sessionMap.has(salesUserId), true, 'Session for sales must remain active');
+    assert.strictEqual(sessionMap.get(salesUserId)?.ws, mockWsNew, 'Session must still reference new socket');
+
+    // 4. When wsNew actually closes, safeRemoveSession removes it cleanly
+    const newRemoved = safeRemoveSession(sessionMap, salesUserId, mockWsNew);
+    assert.strictEqual(newRemoved, true, 'Close event matching current active socket must remove session');
+    assert.strictEqual(sessionMap.has(salesUserId), false, 'Session must now be empty');
+  });
+
+  // Check H6: Admin session identity verification on reconnect and close
+  await runTest('Check H6: Admin session identity verification prevents accidental removal on reconnect', () => {
+    const adminMap = new Map<number, { ws: any; user: any }>();
+    const mockWsAdmin1: any = { id: 'admin_sock_1' };
+    const mockWsAdmin2: any = { id: 'admin_sock_2' };
+    const adminUserId = 1;
+
+    adminMap.set(adminUserId, { ws: mockWsAdmin1, user: { id: adminUserId, name: 'Owner' } });
+
+    // Reconnect
+    adminMap.set(adminUserId, { ws: mockWsAdmin2, user: { id: adminUserId, name: 'Owner' } });
+
+    // Stale close event from admin_sock_1
+    const resOld = safeRemoveSession(adminMap, adminUserId, mockWsAdmin1);
+    assert.strictEqual(resOld, false);
+    assert.strictEqual(adminMap.has(adminUserId), true);
+    assert.strictEqual(adminMap.get(adminUserId)?.ws, mockWsAdmin2);
+
+    // Legitimate close from admin_sock_2
+    const resNew = safeRemoveSession(adminMap, adminUserId, mockWsAdmin2);
+    assert.strictEqual(resNew, true);
+    assert.strictEqual(adminMap.has(adminUserId), false);
+  });
+
+  // Check H7: Heartbeat cleanup handles socket replacement without clearing new connection
+  await runTest('Check H7: Stale heartbeat check does not remove replaced connection', () => {
+    const map = new Map<number, { ws: any; lastPing: number }>();
+    const mockStaleWs: any = { id: 'stale_sock' };
+    const mockActiveWs: any = { id: 'active_sock' };
+    const userId = 8;
+
+    // Initially stale
+    map.set(userId, { ws: mockStaleWs, lastPing: Date.now() - 100000 });
+
+    // Reconnect happens right before heartbeat loop
+    map.set(userId, { ws: mockActiveWs, lastPing: Date.now() });
+
+    // Heartbeat cleanup logic executing for mockStaleWs
+    const removed = safeRemoveSession(map, userId, mockStaleWs);
+    assert.strictEqual(removed, false, 'Heartbeat cleanup of stale socket must not delete reconnected socket');
+    assert.strictEqual(map.get(userId)?.ws, mockActiveWs, 'Active socket must be preserved in map');
   });
 
   // ========================================================

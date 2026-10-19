@@ -187,6 +187,46 @@ export function getMonitoringStatus() {
 }
 
 /**
+ * Safely removes a session only if the map entry currently points
+ * to the exact same WebSocket instance.
+ * Prevents an old disconnecting connection from terminating a newer reconnected session.
+ */
+export function safeRemoveSession<T extends { ws: WebSocket }>(
+  map: Map<number, T>,
+  userId: number,
+  socket: WebSocket
+): boolean {
+  const current = map.get(userId);
+  if (current && current.ws === socket) {
+    map.delete(userId);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Safely removes a sales session and notifies admins if and only if
+ * the active session was genuinely removed (not superseded by reconnect).
+ */
+export function removeSalesSession(userId: number, socket: WebSocket): boolean {
+  const removed = safeRemoveSession(salesClients, userId, socket);
+  if (removed) {
+    broadcastToAdmins({
+      type: 'sales_offline',
+      salesId: userId,
+    });
+  }
+  return removed;
+}
+
+/**
+ * Safely removes an admin session only if the map points to this exact socket.
+ */
+export function removeAdminSession(userId: number, socket: WebSocket): boolean {
+  return safeRemoveSession(adminClients, userId, socket);
+}
+
+/**
  * Initializes WebSocket signaling on the main HTTP server.
  * Handles path /ws/screen-monitoring with strict JWT verification.
  */
@@ -225,6 +265,14 @@ export function setupScreenMonitoringSignaling(server: http.Server): WebSocketSe
       };
 
       if (user.role === 'ADMIN') {
+        const existing = adminClients.get(user.id);
+        if (existing && existing.ws !== ws) {
+          try {
+            existing.ws.close(1000, 'Replaced by newer connection');
+          } catch {
+            existing.ws.terminate();
+          }
+        }
         adminClients.set(user.id, clientRecord);
 
         // Send confirmation and current sales list to the admin
@@ -235,6 +283,14 @@ export function setupScreenMonitoringSignaling(server: http.Server): WebSocketSe
         }));
       } else {
         // Role is SALES
+        const existing = salesClients.get(user.id);
+        if (existing && existing.ws !== ws) {
+          try {
+            existing.ws.close(1000, 'Replaced by newer connection');
+          } catch {
+            existing.ws.terminate();
+          }
+        }
         salesClients.set(user.id, clientRecord);
 
         // Acknowledge connection to sales
@@ -446,23 +502,18 @@ export function setupScreenMonitoringSignaling(server: http.Server): WebSocketSe
       }
     });
 
-    ws.on('close', () => {
+    const cleanupCurrentSession = () => {
       if (authUser) {
         if (authUser.role === 'ADMIN') {
-          adminClients.delete(authUser.id);
+          removeAdminSession(authUser.id, ws);
         } else {
-          salesClients.delete(authUser.id);
-          broadcastToAdmins({
-            type: 'sales_offline',
-            salesId: authUser.id,
-          });
+          removeSalesSession(authUser.id, ws);
         }
       }
-    });
+    };
 
-    ws.on('error', () => {
-      // Handled silently
-    });
+    ws.on('close', cleanupCurrentSession);
+    ws.on('error', cleanupCurrentSession);
   });
 
   // Keep-alive heartbeat interval to prevent NAT timeout
@@ -471,14 +522,13 @@ export function setupScreenMonitoringSignaling(server: http.Server): WebSocketSe
     for (const [id, client] of salesClients.entries()) {
       if (now - client.lastPing > 90000) {
         client.ws.terminate();
-        salesClients.delete(id);
-        broadcastToAdmins({ type: 'sales_offline', salesId: id });
+        removeSalesSession(id, client.ws);
       }
     }
     for (const [id, client] of adminClients.entries()) {
       if (now - client.lastPing > 90000) {
         client.ws.terminate();
-        adminClients.delete(id);
+        removeAdminSession(id, client.ws);
       }
     }
   }, 30000);
