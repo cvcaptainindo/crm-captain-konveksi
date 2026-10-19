@@ -20,6 +20,7 @@ import { AuditLogsPage } from './pages/AuditLogsPage.js';
 import { TrashPage } from './pages/TrashPage.js';
 import { TransactionsPage } from './pages/TransactionsPage.js';
 import { SalesManagementPage } from './pages/SalesManagementPage.js';
+import { ScreenMonitoringPage } from './pages/ScreenMonitoringPage.js';
 
 // Modals
 import { CustomerFormModal } from './components/customers/CustomerFormModal.js';
@@ -132,6 +133,8 @@ const MainApp: React.FC = () => {
         return 'Agenda Follow-Up';
       case 'templates':
         return 'Template WhatsApp';
+      case 'screen_monitoring':
+        return 'Live Monitor WhatsApp Web (Admin)';
       case 'sales_mgmt':
         return 'Kelola Akun Sales';
       case 'rules':
@@ -194,6 +197,8 @@ const MainApp: React.FC = () => {
           )}
 
           {currentTab === 'templates' && <WhatsAppTemplatesPage />}
+
+          {currentTab === 'screen_monitoring' && isAdmin && <ScreenMonitoringPage />}
 
           {currentTab === 'sales_mgmt' && isAdmin && <SalesManagementPage />}
 

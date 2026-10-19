@@ -12,6 +12,7 @@ import {
   X,
   DollarSign,
   UserCheck,
+  Tv,
 } from 'lucide-react';
 
 export type NavTab =
@@ -20,6 +21,7 @@ export type NavTab =
   | 'transactions'
   | 'schedule'
   | 'templates'
+  | 'screen_monitoring'
   | 'sales_mgmt'
   | 'rules'
   | 'audit'
@@ -51,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'transactions' as NavTab, label: 'Transaksi & Omzet', icon: DollarSign, adminOnly: false },
     { id: 'schedule' as NavTab, label: 'Agenda Follow-Up', icon: CalendarClock, adminOnly: false },
     { id: 'templates' as NavTab, label: 'WhatsApp Templates', icon: MessageSquareText, adminOnly: false },
+    { id: 'screen_monitoring' as NavTab, label: 'Live Monitor WA', icon: Tv, adminOnly: true },
     { id: 'sales_mgmt' as NavTab, label: 'Kelola Akun Sales', icon: UserCheck, adminOnly: true },
     { id: 'rules' as NavTab, label: 'Aturan Follow-Up', icon: Sliders, adminOnly: true },
     { id: 'audit' as NavTab, label: 'Audit Log Forensik', icon: History, adminOnly: true },

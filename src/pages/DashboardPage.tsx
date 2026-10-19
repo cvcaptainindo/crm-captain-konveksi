@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Customer, DashboardStats } from '../types/index.js';
 import { apiRequest } from '../api/client.js';
+import { useAuth } from '../contexts/AuthContext.js';
 import { useToast } from '../contexts/ToastContext.js';
+import { SalesScreenSharePanel } from '../components/screenMonitoring/SalesScreenSharePanel.js';
 import {
   Users,
   Clock,
@@ -30,6 +32,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   onNavigateToTransactions,
 }) => {
   const { showToast } = useToast();
+  const { isAdmin } = useAuth();
   const [data, setData] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -91,6 +94,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           <ChevronRight className="w-4 h-4 text-neutral-400" />
         </button>
       </div>
+
+      {/* For Sales: Dedicated Live Monitor WA Screen Sharing Panel */}
+      {!isAdmin && <SalesScreenSharePanel />}
 
       {/* KPI Cards Grid - Consistent Base Color (White Surface + Subtle Border + Gold Accent) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">

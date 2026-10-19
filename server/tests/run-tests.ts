@@ -20,6 +20,7 @@ import { parseTemplate, sanitizeWhatsAppPhone, buildWhatsAppLink } from '../serv
 import { generateCustomerExport, generateActivityExport, generateTransactionExport, sanitizeSpreadsheetCell } from '../services/exportService.js';
 import { isValidCalendarDate } from '../controllers/transaction.controller.js';
 import { validateTemplateForPreview } from '../controllers/template.controller.js';
+import { validateSignalingMessage } from '../services/screenMonitoringSignaling.js';
 
 interface TestResult {
   name: string;
@@ -1380,6 +1381,98 @@ async function runTestSuite() {
 
     // Not changing password -> 200
     assert.strictEqual(validateProfilePasswordUpdate({}).status, 200);
+  });
+
+  // ========================================================
+  // SECTION 10: Live Monitor WA Screen Monitoring & Signaling RBAC
+  // ========================================================
+  console.log('\nSECTION 10: Live Monitor WA Screen Monitoring & Signaling RBAC');
+
+  // Check H1: Authentication gate
+  await runTest('Check H1: Signaling rejects unauthenticated message exchange', () => {
+    // Unauthenticated user attempting to send stream_started or offer
+    const resUnauth = validateSignalingMessage(null, { type: 'stream_started' });
+    assert.strictEqual(resUnauth.allowed, false);
+    assert.strictEqual(resUnauth.reason, 'Koneksi belum diautentikasi.');
+
+    // Unauthenticated user sending auth message is allowed through to token verification
+    const resAuth = validateSignalingMessage(null, { type: 'auth' });
+    assert.strictEqual(resAuth.allowed, true);
+  });
+
+  // Check H2: Sales RBAC isolation
+  await runTest('Check H2: Sales cannot request other Sales streams or access supervisor sales list', () => {
+    const salesUser = { id: 2, name: 'Sales Agent', role: 'SALES' };
+
+    // Sales attempting to request another sales' screen
+    const resRequest = validateSignalingMessage(salesUser, { type: 'request_stream', salesId: 3 });
+    assert.strictEqual(resRequest.allowed, false);
+    assert.strictEqual(resRequest.reason?.includes('Sales tidak diizinkan meminta stream'), true);
+
+    // Sales attempting to get sales list
+    const resList = validateSignalingMessage(salesUser, { type: 'get_sales_list' });
+    assert.strictEqual(resList.allowed, false);
+    assert.strictEqual(resList.reason?.includes('Hanya Admin yang berhak'), true);
+
+    // Sales sending stream_started -> allowed and broadcasted to admins
+    const resStreamStart = validateSignalingMessage(salesUser, { type: 'stream_started' });
+    assert.strictEqual(resStreamStart.allowed, true);
+    assert.strictEqual(resStreamStart.forwardTo, 'broadcast_admins');
+
+    // Sales sending stream_stopped -> allowed and broadcasted to admins
+    const resStreamStop = validateSignalingMessage(salesUser, { type: 'stream_stopped' });
+    assert.strictEqual(resStreamStop.allowed, true);
+    assert.strictEqual(resStreamStop.forwardTo, 'broadcast_admins');
+  });
+
+  // Check H3: Admin supervisor permissions
+  await runTest('Check H3: Admin has supervisor authority to request streams and view active sales list', () => {
+    const adminUser = { id: 1, name: 'Admin Boss', role: 'ADMIN' };
+
+    // Admin requesting sales stream with valid salesId
+    const resRequest = validateSignalingMessage(adminUser, { type: 'request_stream', salesId: 2 });
+    assert.strictEqual(resRequest.allowed, true);
+    assert.strictEqual(resRequest.forwardTo, 'sales');
+
+    // Admin requesting sales stream without salesId -> rejected
+    const resNoSalesId = validateSignalingMessage(adminUser, { type: 'request_stream' });
+    assert.strictEqual(resNoSalesId.allowed, false);
+    assert.strictEqual(resNoSalesId.reason, 'Target Sales ID wajib disertakan.');
+
+    // Admin requesting sales list
+    const resList = validateSignalingMessage(adminUser, { type: 'get_sales_list' });
+    assert.strictEqual(resList.allowed, true);
+
+    // Admin cannot broadcast stream_started (Admin is viewer, not streamer)
+    const resAdminStream = validateSignalingMessage(adminUser, { type: 'stream_started' });
+    assert.strictEqual(resAdminStream.allowed, false);
+    assert.strictEqual(resAdminStream.reason?.includes('viewer/pengawas'), true);
+  });
+
+  // Check H4: WebRTC Offer/Answer relay validation & target ID enforcement
+  await runTest('Check H4: WebRTC Offer/Answer and ICE candidates enforce target IDs', () => {
+    const salesUser = { id: 2, name: 'Sales Agent', role: 'SALES' };
+    const adminUser = { id: 1, name: 'Admin Boss', role: 'ADMIN' };
+
+    // Sales sending offer without target Admin ID -> rejected
+    const resOfferNoTarget = validateSignalingMessage(salesUser, { type: 'offer', sdp: {} });
+    assert.strictEqual(resOfferNoTarget.allowed, false);
+    assert.strictEqual(resOfferNoTarget.reason, 'Target ID Admin wajib disertakan.');
+
+    // Sales sending offer with target Admin ID -> allowed and forwarded to admin
+    const resOfferValid = validateSignalingMessage(salesUser, { type: 'offer', targetId: 1, sdp: {} });
+    assert.strictEqual(resOfferValid.allowed, true);
+    assert.strictEqual(resOfferValid.forwardTo, 'admin');
+
+    // Admin sending answer without target Sales ID -> rejected
+    const resAnswerNoTarget = validateSignalingMessage(adminUser, { type: 'answer', sdp: {} });
+    assert.strictEqual(resAnswerNoTarget.allowed, false);
+    assert.strictEqual(resAnswerNoTarget.reason, 'Target Sales ID wajib disertakan.');
+
+    // Admin sending answer with target Sales ID -> allowed and forwarded to sales
+    const resAnswerValid = validateSignalingMessage(adminUser, { type: 'answer', targetId: 2, sdp: {} });
+    assert.strictEqual(resAnswerValid.allowed, true);
+    assert.strictEqual(resAnswerValid.forwardTo, 'sales');
   });
 
   // ========================================================

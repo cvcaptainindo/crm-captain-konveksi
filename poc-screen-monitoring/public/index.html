@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POC Live WhatsApp Web Screen Monitoring — CRM Captain Konveksi</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <span class="brand-badge">POC WebRTC</span>
+        <div>
+          <h1 class="brand-title">CRM Captain Konveksi — Live Screen Monitoring</h1>
+          <p class="brand-sub">Prototipe Terisolasi: Pemantauan Layar WhatsApp Web Seluruh Sales secara Real-Time</p>
+        </div>
+      </div>
+      <div>
+        <span class="status-pill">
+          <span class="status-dot online"></span>
+          POC Isolated Environment
+        </span>
+      </div>
+    </header>
+
+    <div class="card">
+      <div class="card-title">
+        <span>Tujuan & Ruang Lingkup Prototipe (Phase 1 POC)</span>
+      </div>
+      <p style="color: var(--text-muted); margin-bottom: 0.75rem;">
+        Prototipe ini membuktikan kelayakan teknis memantau <strong>tampilan layar tab WhatsApp Web seluruh Sales secara langsung (Live)</strong> dalam satu layar komputer Admin tanpa biaya langganan API berbayar (Rp 0), tanpa bot tidak resmi yang berisiko banned, dan tanpa mengubah database produksi CRM Captain Konveksi.
+      </p>
+      <div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.85rem; color: #94a3b8;">
+        <div>✓ <strong>Teknologi:</strong> Browser Screen Capture (<code>getDisplayMedia</code>) + WebRTC P2P + WebSocket Signaling</div>
+        <div>✓ <strong>Biaya Langganan:</strong> Rp 0 (Free Open Web Standards)</div>
+        <div>✓ <strong>Keamanan:</strong> Audio/Mikrofon dinonaktifkan (Video Tab Only)</div>
+      </div>
+    </div>
+
+    <h2 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem;">Pilih Peran Pengujian</h2>
+    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+      Anda dapat membuka halaman-halaman berikut di tab atau jendela browser berbeda untuk menguji interaksi langsung antara Sales dan Admin:
+    </p>
+
+    <div class="hub-grid">
+      <!-- Admin Dashboard -->
+      <div class="hub-card">
+        <div>
+          <div class="hub-icon">🖥️</div>
+          <div class="hub-title">Admin Monitoring Grid</div>
+          <div class="hub-desc">
+            Dashboard untuk Admin/Owner. Menampilkan seluruh feed layar Sales dalam format Grid multi-layar secara simultan, lengkap dengan indikator status, FPS/bitrate, dan fitur perbesar layar (Focus Mode).
+          </div>
+        </div>
+        <a href="admin.html" class="btn btn-primary" target="_blank">
+          Buka Dashboard Admin ↗
+        </a>
+      </div>
+
+      <!-- Sales 1 Streamer -->
+      <div class="hub-card">
+        <div>
+          <div class="hub-icon">👨‍💼</div>
+          <div class="hub-title">Komputer Sales 1 (Ahmad)</div>
+          <div class="hub-desc">
+            Portal untuk Sales 1. Melakukan autentikasi uji, memilih tab WhatsApp Web untuk dibagikan, mengatur kualitas transmisi, dan melihat status koneksi live.
+          </div>
+        </div>
+        <a href="sales.html?id=sales-1&name=Sales%20Ahmad%20(CS%201)" class="btn btn-success" target="_blank">
+          Buka Portal Sales 1 ↗
+        </a>
+      </div>
+
+      <!-- Sales 2 Streamer -->
+      <div class="hub-card">
+        <div>
+          <div class="hub-icon">👩‍💼</div>
+          <div class="hub-title">Komputer Sales 2 (Budi)</div>
+          <div class="hub-desc">
+            Portal untuk Sales 2. Mensimulasikan komputer Sales kedua yang berbagi tab WhatsApp Web secara bersamaan ke Admin yang sama.
+          </div>
+        </div>
+        <a href="sales.html?id=sales-2&name=Sales%20Budi%20(CS%202)" class="btn btn-success" target="_blank">
+          Buka Portal Sales 2 ↗
+        </a>
+      </div>
+
+      <!-- Interactive Dual Simulation -->
+      <div class="hub-card" style="border-color: var(--accent-purple);">
+        <div>
+          <div class="hub-icon">⚡</div>
+          <div class="hub-title">Simulasi 2-Sales Langsung (1 Tab)</div>
+          <div class="hub-desc">
+            Uji coba instan tanpa perlu membuka banyak tab atau izin share screen. Menjalankan 2 feed video simulasi WhatsApp Web (CS 1 & CS 2) dan menghubungkannya via WebRTC ke Admin Grid secara otomatis.
+          </div>
+        </div>
+        <a href="simulation.html" class="btn btn-primary" style="background-color: var(--accent-purple);" target="_blank">
+          Jalankan Simulasi Instan ↗
+        </a>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 2rem;">
+      <div class="card-title">
+        <span>Arsitektur & Konfigurasi Jaringan (STUN / TURN)</span>
+      </div>
+      <div style="font-size: 0.9rem; color: var(--text-muted); line-height: 1.7;">
+        <p><strong>1. Koneksi Jaringan Kantor (Local LAN / Wi-Fi Sama):</strong> WebRTC langsung terhubung P2P secara lokal tanpa keluar ke internet publik, menghasilkan latensi sangat rendah (&lt; 20ms) dan kualitas gambar jernih.</p>
+        <p><strong>2. Koneksi Internet Lintas Lokasi (STUN):</strong> Menggunakan Google STUN (<code>stun:stun.l.google.com:19302</code>) untuk mendeteksi IP publik jika Sales dan Admin bekerja dari tempat berbeda (misal Sales WFH dan Admin di kantor).</p>
+        <p><strong>3. Relai Simetrik (TURN):</strong> Jika kedua pihak berada di balik firewall perusahaan atau NAT simetrik yang ketat, TURN relay server (seperti Coturn gratis open-source atau Metered) dapat diaktifkan sebagai jalur cadangan agar koneksi tidak pernah gagal.</p>
+        <p><strong>4. Optimasi Bandwidth:</strong> Tab teks seperti WhatsApp Web hanya membutuhkan 10 FPS pada resolusi 720p. Konsumsi bandwidth hanya sekitar <strong>250 Kbps per Sales</strong>, sehingga Admin dapat memantau 10 Sales sekaligus dengan bandwidth internet ~2.5 Mbps saja.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

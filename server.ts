@@ -6,6 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { apiRouter } from './server/routes/api.routes.js';
 import { validateDbConfig, testDbConnection, checkDbHealth } from './server/database/db.js';
+import { setupScreenMonitoringSignaling } from './server/services/screenMonitoringSignaling.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -111,9 +112,12 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[CRM Captain Konveksi] Server running at http://0.0.0.0:${PORT} in ${isProd ? 'production' : 'development'} mode`);
   });
+
+  // Setup WebRTC Screen Monitoring Signaling (WebSocket /ws/screen-monitoring)
+  setupScreenMonitoringSignaling(httpServer);
 }
 
 startServer().catch((err) => {
