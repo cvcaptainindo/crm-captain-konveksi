@@ -68,6 +68,16 @@ export async function authenticateToken(token: string): Promise<User | null> {
  * Validates incoming signaling messages and enforces strict RBAC rules.
  * Ensures SALES cannot request streams from other sales or access restricted supervisor actions.
  */
+/**
+ * Runtime allowlist for WebSocket monitoring roles.
+ * Unknown roles must never be treated as Sales.
+ */
+export function isSupportedMonitoringRole(
+  role: unknown
+): role is 'ADMIN' | 'SALES' {
+  return role === 'ADMIN' || role === 'SALES';
+}
+
 export function validateSignalingMessage(
   user: { id: number; role: 'ADMIN' | 'SALES' | string; name: string } | null,
   message: { type: string; targetId?: number | string; salesId?: number | string; sdp?: any; candidate?: any }
@@ -77,64 +87,40 @@ export function validateSignalingMessage(
   forwardTo?: 'admin' | 'sales' | 'broadcast_admins';
 } {
   if (!user) {
-    if (message.type === 'auth') {
-      return { allowed: true };
-    }
+    if (message.type === 'auth') return { allowed: true };
     return { allowed: false, reason: 'Koneksi belum diautentikasi.' };
   }
 
-  // SALES RBAC Rules
+  if (!isSupportedMonitoringRole(user.role)) {
+    return { allowed: false, reason: 'Peran pengguna tidak dikenali.' };
+  }
+
   if (user.role === 'SALES') {
     switch (message.type) {
+      case 'ping':
+        return { allowed: true };
       case 'stream_started':
       case 'stream_stopped':
         return { allowed: true, forwardTo: 'broadcast_admins' };
-      case 'offer':
-      case 'ice_candidate':
-      case 'telemetry':
-        if (!message.targetId) {
-          return { allowed: false, reason: 'Target ID Admin wajib disertakan.' };
-        }
-        return { allowed: true, forwardTo: 'admin' };
-      case 'ping':
-        return { allowed: true };
-      case 'request_stream':
-        return { allowed: false, reason: 'Akses ditolak: Sales tidak diizinkan meminta stream layar Sales lain.' };
-      case 'get_sales_list':
-        return { allowed: false, reason: 'Akses ditolak: Hanya Admin yang berhak melihat daftar pemantauan Sales.' };
       default:
-        return { allowed: false, reason: `Tipe pesan tidak diizinkan untuk Sales: ${message.type}` };
+        return {
+          allowed: false,
+          reason: `Tipe pesan tidak diizinkan untuk monitoring event-only: ${message.type}`,
+        };
     }
   }
 
-  // ADMIN RBAC Rules
-  if (user.role === 'ADMIN') {
-    switch (message.type) {
-      case 'request_stream':
-        if (!message.salesId) {
-          return { allowed: false, reason: 'Target Sales ID wajib disertakan.' };
-        }
-        return { allowed: true, forwardTo: 'sales' };
-      case 'answer':
-      case 'ice_candidate':
-        if (!message.targetId) {
-          return { allowed: false, reason: 'Target Sales ID wajib disertakan.' };
-        }
-        return { allowed: true, forwardTo: 'sales' };
-      case 'get_sales_list':
-      case 'ping':
-        return { allowed: true };
-      case 'stream_started':
-      case 'stream_stopped':
-        return { allowed: false, reason: 'Admin hanya bertindak sebagai viewer/pengawas.' };
-      default:
-        return { allowed: false, reason: `Tipe pesan tidak diizinkan untuk Admin: ${message.type}` };
-    }
+  switch (message.type) {
+    case 'ping':
+    case 'get_sales_list':
+      return { allowed: true };
+    default:
+      return {
+        allowed: false,
+        reason: `Tipe pesan tidak diizinkan untuk monitoring event-only: ${message.type}`,
+      };
   }
-
-  return { allowed: false, reason: 'Peran pengguna tidak dikenali.' };
 }
-
 /**
  * Returns the list of currently connected Sales and their stream status.
  * Strictly available only for Admin viewers.
@@ -158,24 +144,6 @@ function broadcastToAdmins(message: any) {
   }
 }
 
-function sendToSales(salesId: number, message: any): boolean {
-  const sales = salesClients.get(salesId);
-  if (sales && sales.ws.readyState === WebSocket.OPEN) {
-    sales.ws.send(JSON.stringify(message));
-    return true;
-  }
-  return false;
-}
-
-function sendToAdmin(adminId: number, message: any): boolean {
-  const admin = adminClients.get(adminId);
-  if (admin && admin.ws.readyState === WebSocket.OPEN) {
-    admin.ws.send(JSON.stringify(message));
-    return true;
-  }
-  return false;
-}
-
 export function getMonitoringStatus() {
   return {
     totalSalesConnected: salesClients.size,
@@ -191,6 +159,14 @@ export function getMonitoringStatus() {
  * to the exact same WebSocket instance.
  * Prevents an old disconnecting connection from terminating a newer reconnected session.
  */
+export function isCurrentSocketSession<T extends { ws: any }>(
+  sessions: Map<number, T>,
+  userId: number,
+  ws: any
+): boolean {
+  return sessions.get(userId)?.ws === ws;
+}
+
 export function safeRemoveSession<T extends { ws: WebSocket }>(
   map: Map<number, T>,
   userId: number,
@@ -256,6 +232,21 @@ export function setupScreenMonitoringSignaling(server: http.Server): WebSocketSe
     }
 
     const registerClient = (user: User) => {
+      // Fail closed: reject unsupported roles at runtime.
+      if (!isSupportedMonitoringRole(user.role)) {
+        authUser = null;
+        try {
+          ws.send(JSON.stringify({
+            type: 'auth_error',
+            message: 'Peran pengguna tidak diizinkan untuk monitoring.',
+          }));
+          ws.close(4403, 'Forbidden role');
+        } catch {
+          ws.terminate();
+        }
+        return;
+      }
+
       authUser = user;
       const clientRecord: AuthenticatedClient = {
         ws,
@@ -339,6 +330,25 @@ export function setupScreenMonitoringSignaling(server: http.Server): WebSocketSe
           return;
         }
 
+        // Reject messages from superseded WebSocket sessions.
+        // A reconnect may replace this user's socket while the old
+        // socket is still closing. Never let that old socket mutate
+        // the newly registered session.
+        const activeSessions = authUser.role === 'ADMIN'
+          ? adminClients
+          : authUser.role === 'SALES'
+            ? salesClients
+            : undefined;
+
+        if (!activeSessions || !isCurrentSocketSession(activeSessions, authUser.id, ws)) {
+          try {
+            ws.close(4001, 'Session replaced');
+          } catch {
+            ws.terminate();
+          }
+          return;
+        }
+
         // Enforce RBAC validation
         const validation = validateSignalingMessage(authUser, data);
         if (!validation.allowed) {
@@ -381,47 +391,6 @@ export function setupScreenMonitoringSignaling(server: http.Server): WebSocketSe
               break;
             }
 
-            // Sales sends SDP Offer to Admin
-            case 'offer': {
-              const targetAdminId = parseInt(data.targetId, 10);
-              // Target MUST be an authenticated Admin
-              if (adminClients.has(targetAdminId)) {
-                sendToAdmin(targetAdminId, {
-                  type: 'offer',
-                  senderId: authUser.id,
-                  senderName: authUser.name,
-                  sdp: data.sdp,
-                });
-              }
-              break;
-            }
-
-            // Sales sends ICE candidate to Admin
-            case 'ice_candidate': {
-              const targetAdminId = parseInt(data.targetId, 10);
-              if (adminClients.has(targetAdminId)) {
-                sendToAdmin(targetAdminId, {
-                  type: 'ice_candidate',
-                  senderId: authUser.id,
-                  candidate: data.candidate,
-                });
-              }
-              break;
-            }
-
-            // Sales sends real-time telemetry (fps, resolution) to Admin
-            case 'telemetry': {
-              const targetAdminId = parseInt(data.targetId, 10);
-              if (adminClients.has(targetAdminId)) {
-                sendToAdmin(targetAdminId, {
-                  type: 'telemetry',
-                  senderId: authUser.id,
-                  stats: data.stats,
-                });
-              }
-              break;
-            }
-
             case 'ping': {
               const sales = salesClients.get(authUser.id);
               if (sales) sales.lastPing = Date.now();
@@ -439,45 +408,6 @@ export function setupScreenMonitoringSignaling(server: http.Server): WebSocketSe
         // ==========================================================
         if (authUser.role === 'ADMIN') {
           switch (data.type) {
-            case 'request_stream': {
-              const targetSalesId = parseInt(data.salesId, 10);
-              const sales = salesClients.get(targetSalesId);
-              if (sales) {
-                sendToSales(targetSalesId, {
-                  type: 'stream_requested_by_admin',
-                  adminId: authUser.id,
-                  adminName: authUser.name,
-                });
-              }
-              break;
-            }
-
-            // Admin sends SDP Answer back to Sales
-            case 'answer': {
-              const targetSalesId = parseInt(data.targetId, 10);
-              if (salesClients.has(targetSalesId)) {
-                sendToSales(targetSalesId, {
-                  type: 'answer',
-                  senderId: authUser.id,
-                  sdp: data.sdp,
-                });
-              }
-              break;
-            }
-
-            // Admin sends ICE candidate to Sales
-            case 'ice_candidate': {
-              const targetSalesId = parseInt(data.targetId, 10);
-              if (salesClients.has(targetSalesId)) {
-                sendToSales(targetSalesId, {
-                  type: 'ice_candidate',
-                  senderId: authUser.id,
-                  candidate: data.candidate,
-                });
-              }
-              break;
-            }
-
             case 'get_sales_list': {
               ws.send(JSON.stringify({
                 type: 'sales_list',

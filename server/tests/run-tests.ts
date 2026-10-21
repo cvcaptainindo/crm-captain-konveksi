@@ -20,7 +20,7 @@ import { parseTemplate, sanitizeWhatsAppPhone, buildWhatsAppLink } from '../serv
 import { generateCustomerExport, generateActivityExport, generateTransactionExport, sanitizeSpreadsheetCell } from '../services/exportService.js';
 import { isValidCalendarDate } from '../controllers/transaction.controller.js';
 import { validateTemplateForPreview } from '../controllers/template.controller.js';
-import { validateSignalingMessage, safeRemoveSession } from '../services/screenMonitoringSignaling.js';
+import { validateSignalingMessage, safeRemoveSession, isCurrentSocketSession, isSupportedMonitoringRole } from '../services/screenMonitoringSignaling.js';
 
 interface TestResult {
   name: string;
@@ -1401,43 +1401,39 @@ async function runTestSuite() {
   });
 
   // Check H2: Sales RBAC isolation
-  await runTest('Check H2: Sales cannot request other Sales streams or access supervisor sales list', () => {
+  await runTest('Check H2: Sales is restricted to event-only messages and cannot access the supervisor sales list', () => {
     const salesUser = { id: 2, name: 'Sales Agent', role: 'SALES' };
 
-    // Sales attempting to request another sales' screen
+    // Sales attempting to send a legacy stream request
     const resRequest = validateSignalingMessage(salesUser, { type: 'request_stream', salesId: 3 });
     assert.strictEqual(resRequest.allowed, false);
-    assert.strictEqual(resRequest.reason?.includes('Sales tidak diizinkan meminta stream'), true);
+    assert.strictEqual(resRequest.reason?.includes('event-only'), true);
 
     // Sales attempting to get sales list
     const resList = validateSignalingMessage(salesUser, { type: 'get_sales_list' });
     assert.strictEqual(resList.allowed, false);
-    assert.strictEqual(resList.reason?.includes('Hanya Admin yang berhak'), true);
+    assert.strictEqual(resList.reason?.includes('event-only'), true);
 
     // Sales sending stream_started -> allowed and broadcasted to admins
     const resStreamStart = validateSignalingMessage(salesUser, { type: 'stream_started' });
     assert.strictEqual(resStreamStart.allowed, true);
-    assert.strictEqual(resStreamStart.forwardTo, 'broadcast_admins');
 
     // Sales sending stream_stopped -> allowed and broadcasted to admins
     const resStreamStop = validateSignalingMessage(salesUser, { type: 'stream_stopped' });
     assert.strictEqual(resStreamStop.allowed, true);
-    assert.strictEqual(resStreamStop.forwardTo, 'broadcast_admins');
   });
 
   // Check H3: Admin supervisor permissions
-  await runTest('Check H3: Admin has supervisor authority to request streams and view active sales list', () => {
+  await runTest('Check H3: Admin can view the active Sales list but cannot request streams in event-only mode', () => {
     const adminUser = { id: 1, name: 'Admin Boss', role: 'ADMIN' };
 
-    // Admin requesting sales stream with valid salesId
+    // Admin attempting a legacy stream request with salesId
     const resRequest = validateSignalingMessage(adminUser, { type: 'request_stream', salesId: 2 });
-    assert.strictEqual(resRequest.allowed, true);
-    assert.strictEqual(resRequest.forwardTo, 'sales');
+    assert.strictEqual(resRequest.allowed, false);
 
-    // Admin requesting sales stream without salesId -> rejected
+    // Admin attempting a legacy stream request without salesId
     const resNoSalesId = validateSignalingMessage(adminUser, { type: 'request_stream' });
     assert.strictEqual(resNoSalesId.allowed, false);
-    assert.strictEqual(resNoSalesId.reason, 'Target Sales ID wajib disertakan.');
 
     // Admin requesting sales list
     const resList = validateSignalingMessage(adminUser, { type: 'get_sales_list' });
@@ -1446,36 +1442,71 @@ async function runTestSuite() {
     // Admin cannot broadcast stream_started (Admin is viewer, not streamer)
     const resAdminStream = validateSignalingMessage(adminUser, { type: 'stream_started' });
     assert.strictEqual(resAdminStream.allowed, false);
-    assert.strictEqual(resAdminStream.reason?.includes('viewer/pengawas'), true);
+    assert.strictEqual(resAdminStream.reason?.includes('event-only'), true);
   });
 
-  // Check H4: WebRTC Offer/Answer relay validation & target ID enforcement
-  await runTest('Check H4: WebRTC Offer/Answer and ICE candidates enforce target IDs', () => {
+  // Check H4: Legacy WebRTC messages rejected in event-only mode
+  await runTest('Check H4: Event-only protocol rejects legacy WebRTC messages', () => {
     const salesUser = { id: 2, name: 'Sales Agent', role: 'SALES' };
     const adminUser = { id: 1, name: 'Admin Boss', role: 'ADMIN' };
 
-    // Sales sending offer without target Admin ID -> rejected
-    const resOfferNoTarget = validateSignalingMessage(salesUser, { type: 'offer', sdp: {} });
-    assert.strictEqual(resOfferNoTarget.allowed, false);
-    assert.strictEqual(resOfferNoTarget.reason, 'Target ID Admin wajib disertakan.');
+    for (const type of ['offer', 'ice_candidate', 'telemetry', 'request_stream', 'answer']) {
+      assert.strictEqual(
+        validateSignalingMessage(salesUser, { type, targetId: 1, salesId: 3 }).allowed,
+        false,
+        `Sales legacy message ${type} must be rejected`
+      );
+    }
 
-    // Sales sending offer with target Admin ID -> allowed and forwarded to admin
-    const resOfferValid = validateSignalingMessage(salesUser, { type: 'offer', targetId: 1, sdp: {} });
-    assert.strictEqual(resOfferValid.allowed, true);
-    assert.strictEqual(resOfferValid.forwardTo, 'admin');
+    for (const type of ['answer', 'ice_candidate', 'request_stream', 'stream_started', 'stream_stopped', 'offer', 'telemetry']) {
+      assert.strictEqual(
+        validateSignalingMessage(adminUser, { type, targetId: 2, salesId: 2 }).allowed,
+        false,
+        `Admin legacy message ${type} must be rejected`
+      );
+    }
 
-    // Admin sending answer without target Sales ID -> rejected
-    const resAnswerNoTarget = validateSignalingMessage(adminUser, { type: 'answer', sdp: {} });
-    assert.strictEqual(resAnswerNoTarget.allowed, false);
-    assert.strictEqual(resAnswerNoTarget.reason, 'Target Sales ID wajib disertakan.');
-
-    // Admin sending answer with target Sales ID -> allowed and forwarded to sales
-    const resAnswerValid = validateSignalingMessage(adminUser, { type: 'answer', targetId: 2, sdp: {} });
-    assert.strictEqual(resAnswerValid.allowed, true);
-    assert.strictEqual(resAnswerValid.forwardTo, 'sales');
+    assert.strictEqual(validateSignalingMessage(salesUser, { type: 'ping' }).allowed, true);
+    assert.strictEqual(validateSignalingMessage(salesUser, { type: 'stream_started' }).allowed, true);
+    assert.strictEqual(validateSignalingMessage(salesUser, { type: 'stream_stopped' }).allowed, true);
+    assert.strictEqual(validateSignalingMessage(adminUser, { type: 'ping' }).allowed, true);
+    assert.strictEqual(validateSignalingMessage(adminUser, { type: 'get_sales_list' }).allowed, true);
   });
 
-  // Check H5: Reconnection race condition prevention (Sales session identity)
+  await runTest('Check H9: Monitoring accepts only ADMIN and SALES roles', () => {
+    assert.strictEqual(isSupportedMonitoringRole('ADMIN'), true);
+    assert.strictEqual(isSupportedMonitoringRole('SALES'), true);
+    assert.strictEqual(isSupportedMonitoringRole('OWNER'), false);
+    assert.strictEqual(isSupportedMonitoringRole(''), false);
+    assert.strictEqual(isSupportedMonitoringRole(null), false);
+    assert.strictEqual(isSupportedMonitoringRole(undefined), false);
+  });
+
+  // Check H8: Superseded sockets cannot mutate the active session
+  await runTest('Check H8: Only the current socket may send session messages', () => {
+    const oldSocket: any = { id: 'old_socket' };
+    const activeSocket: any = { id: 'active_socket' };
+    const sessions = new Map<number, { ws: any }>();
+
+    sessions.set(5, { ws: activeSocket });
+
+    assert.strictEqual(
+      isCurrentSocketSession(sessions, 5, oldSocket),
+      false,
+      'Replaced socket must be rejected'
+    );
+    assert.strictEqual(
+      isCurrentSocketSession(sessions, 5, activeSocket),
+      true,
+      'Current socket must be accepted'
+    );
+    assert.strictEqual(
+      isCurrentSocketSession(sessions, 99, activeSocket),
+      false,
+      'Socket without a registered session must be rejected'
+    );
+  });
+
   await runTest('Check H5: WebSocket session identity verification prevents race conditions on reconnect and stale close', () => {
     const sessionMap = new Map<number, { ws: any; user: any }>();
     const mockWsOld: any = { id: 'ws_old_conn_1' };
