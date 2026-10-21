@@ -9,7 +9,6 @@ import * as tplCtrl from '../controllers/template.controller.js';
 import * as auditCtrl from '../controllers/audit.controller.js';
 import * as expCtrl from '../controllers/export.controller.js';
 import * as trxCtrl from '../controllers/transaction.controller.js';
-import { getMonitoringStatus } from '../services/screenMonitoringSignaling.js';
 
 export const apiRouter = Router();
 
@@ -101,13 +100,3 @@ apiRouter.get('/audit-logs', authMiddleware, requireAdmin, auditCtrl.getAuditLog
 apiRouter.get('/export/customers', authMiddleware, expCtrl.exportCustomers);
 apiRouter.get('/export/activities', authMiddleware, expCtrl.exportActivities);
 apiRouter.get('/export/transactions', authMiddleware, expCtrl.exportTransactions);
-
-// ========================================================
-// 11. LIVE SCREEN MONITORING (Admin only status endpoint)
-// ========================================================
-apiRouter.get('/screen-monitoring/status', authMiddleware, requireAdmin, (req, res) => {
-  res.json({
-    success: true,
-    data: getMonitoringStatus(),
-  });
-});
