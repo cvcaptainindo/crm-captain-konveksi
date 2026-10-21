@@ -12,7 +12,6 @@ import {
   X,
   DollarSign,
   UserCheck,
-  Tv,
   Radio,
   MessageSquare,
   FileText,
@@ -27,7 +26,6 @@ export type NavTab =
   | 'wa_workspace'
   | 'connect_wa'
   | 'wa_monitoring'
-  | 'screen_monitoring'
   | 'sales_mgmt'
   | 'rules'
   | 'audit'
@@ -62,7 +60,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'wa_workspace' as NavTab, label: 'WhatsApp Web', icon: MessageSquare, adminOnly: false, salesOnly: true },
     { id: 'connect_wa' as NavTab, label: 'Live Screen WA', icon: Radio, adminOnly: false, salesOnly: true },
     { id: 'wa_monitoring' as NavTab, label: 'Monitoring Follow-Up WA', icon: FileText, adminOnly: true },
-    { id: 'screen_monitoring' as NavTab, label: 'Live Monitor WA', icon: Tv, adminOnly: true },
     { id: 'sales_mgmt' as NavTab, label: 'Kelola Akun Sales', icon: UserCheck, adminOnly: true },
     { id: 'rules' as NavTab, label: 'Aturan Follow-Up', icon: Sliders, adminOnly: true },
     { id: 'audit' as NavTab, label: 'Audit Log Forensik', icon: History, adminOnly: true },
