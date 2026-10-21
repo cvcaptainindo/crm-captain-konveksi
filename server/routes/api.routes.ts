@@ -71,6 +71,7 @@ apiRouter.delete('/transactions/:id', authMiddleware, requireAdmin, trxCtrl.dele
 apiRouter.get('/follow-ups/dashboard', authMiddleware, fuCtrl.getDashboardStats);
 apiRouter.post('/follow-ups/activities', authMiddleware, fuCtrl.logActivity);
 apiRouter.get('/follow-ups/activities/:customerId', authMiddleware, fuCtrl.getCustomerActivities);
+apiRouter.get('/follow-ups/monitoring', authMiddleware, requireAdmin, fuCtrl.getFollowUpMonitoringList);
 
 // ========================================================
 // 7. FOLLOW-UP RULES (Admin Settings)

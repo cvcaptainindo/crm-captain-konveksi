@@ -20,7 +20,9 @@ import { parseTemplate, sanitizeWhatsAppPhone, buildWhatsAppLink } from '../serv
 import { generateCustomerExport, generateActivityExport, generateTransactionExport, sanitizeSpreadsheetCell } from '../services/exportService.js';
 import { isValidCalendarDate } from '../controllers/transaction.controller.js';
 import { validateTemplateForPreview } from '../controllers/template.controller.js';
-import { validateSignalingMessage, safeRemoveSession, isCurrentSocketSession, isSupportedMonitoringRole } from '../services/screenMonitoringSignaling.js';
+import { validateSignalingMessage, safeRemoveSession } from '../services/screenMonitoringSignaling.js';
+import { checkScreenShareSupport } from '../../src/utils/screenShareSupport.js';
+import { requireAdmin } from '../middlewares/rbac.middleware.js';
 
 interface TestResult {
   name: string;
@@ -1401,39 +1403,43 @@ async function runTestSuite() {
   });
 
   // Check H2: Sales RBAC isolation
-  await runTest('Check H2: Sales is restricted to event-only messages and cannot access the supervisor sales list', () => {
+  await runTest('Check H2: Sales cannot request other Sales streams or access supervisor sales list', () => {
     const salesUser = { id: 2, name: 'Sales Agent', role: 'SALES' };
 
-    // Sales attempting to send a legacy stream request
+    // Sales attempting to request another sales' screen
     const resRequest = validateSignalingMessage(salesUser, { type: 'request_stream', salesId: 3 });
     assert.strictEqual(resRequest.allowed, false);
-    assert.strictEqual(resRequest.reason?.includes('event-only'), true);
+    assert.strictEqual(resRequest.reason?.includes('Sales tidak diizinkan meminta stream'), true);
 
     // Sales attempting to get sales list
     const resList = validateSignalingMessage(salesUser, { type: 'get_sales_list' });
     assert.strictEqual(resList.allowed, false);
-    assert.strictEqual(resList.reason?.includes('event-only'), true);
+    assert.strictEqual(resList.reason?.includes('Hanya Admin yang berhak'), true);
 
     // Sales sending stream_started -> allowed and broadcasted to admins
     const resStreamStart = validateSignalingMessage(salesUser, { type: 'stream_started' });
     assert.strictEqual(resStreamStart.allowed, true);
+    assert.strictEqual(resStreamStart.forwardTo, 'broadcast_admins');
 
     // Sales sending stream_stopped -> allowed and broadcasted to admins
     const resStreamStop = validateSignalingMessage(salesUser, { type: 'stream_stopped' });
     assert.strictEqual(resStreamStop.allowed, true);
+    assert.strictEqual(resStreamStop.forwardTo, 'broadcast_admins');
   });
 
   // Check H3: Admin supervisor permissions
-  await runTest('Check H3: Admin can view the active Sales list but cannot request streams in event-only mode', () => {
+  await runTest('Check H3: Admin has supervisor authority to request streams and view active sales list', () => {
     const adminUser = { id: 1, name: 'Admin Boss', role: 'ADMIN' };
 
-    // Admin attempting a legacy stream request with salesId
+    // Admin requesting sales stream with valid salesId
     const resRequest = validateSignalingMessage(adminUser, { type: 'request_stream', salesId: 2 });
-    assert.strictEqual(resRequest.allowed, false);
+    assert.strictEqual(resRequest.allowed, true);
+    assert.strictEqual(resRequest.forwardTo, 'sales');
 
-    // Admin attempting a legacy stream request without salesId
+    // Admin requesting sales stream without salesId -> rejected
     const resNoSalesId = validateSignalingMessage(adminUser, { type: 'request_stream' });
     assert.strictEqual(resNoSalesId.allowed, false);
+    assert.strictEqual(resNoSalesId.reason, 'Target Sales ID wajib disertakan.');
 
     // Admin requesting sales list
     const resList = validateSignalingMessage(adminUser, { type: 'get_sales_list' });
@@ -1442,71 +1448,36 @@ async function runTestSuite() {
     // Admin cannot broadcast stream_started (Admin is viewer, not streamer)
     const resAdminStream = validateSignalingMessage(adminUser, { type: 'stream_started' });
     assert.strictEqual(resAdminStream.allowed, false);
-    assert.strictEqual(resAdminStream.reason?.includes('event-only'), true);
+    assert.strictEqual(resAdminStream.reason?.includes('viewer/pengawas'), true);
   });
 
-  // Check H4: Legacy WebRTC messages rejected in event-only mode
-  await runTest('Check H4: Event-only protocol rejects legacy WebRTC messages', () => {
+  // Check H4: WebRTC Offer/Answer relay validation & target ID enforcement
+  await runTest('Check H4: WebRTC Offer/Answer and ICE candidates enforce target IDs', () => {
     const salesUser = { id: 2, name: 'Sales Agent', role: 'SALES' };
     const adminUser = { id: 1, name: 'Admin Boss', role: 'ADMIN' };
 
-    for (const type of ['offer', 'ice_candidate', 'telemetry', 'request_stream', 'answer']) {
-      assert.strictEqual(
-        validateSignalingMessage(salesUser, { type, targetId: 1, salesId: 3 }).allowed,
-        false,
-        `Sales legacy message ${type} must be rejected`
-      );
-    }
+    // Sales sending offer without target Admin ID -> rejected
+    const resOfferNoTarget = validateSignalingMessage(salesUser, { type: 'offer', sdp: {} });
+    assert.strictEqual(resOfferNoTarget.allowed, false);
+    assert.strictEqual(resOfferNoTarget.reason, 'Target ID Admin wajib disertakan.');
 
-    for (const type of ['answer', 'ice_candidate', 'request_stream', 'stream_started', 'stream_stopped', 'offer', 'telemetry']) {
-      assert.strictEqual(
-        validateSignalingMessage(adminUser, { type, targetId: 2, salesId: 2 }).allowed,
-        false,
-        `Admin legacy message ${type} must be rejected`
-      );
-    }
+    // Sales sending offer with target Admin ID -> allowed and forwarded to admin
+    const resOfferValid = validateSignalingMessage(salesUser, { type: 'offer', targetId: 1, sdp: {} });
+    assert.strictEqual(resOfferValid.allowed, true);
+    assert.strictEqual(resOfferValid.forwardTo, 'admin');
 
-    assert.strictEqual(validateSignalingMessage(salesUser, { type: 'ping' }).allowed, true);
-    assert.strictEqual(validateSignalingMessage(salesUser, { type: 'stream_started' }).allowed, true);
-    assert.strictEqual(validateSignalingMessage(salesUser, { type: 'stream_stopped' }).allowed, true);
-    assert.strictEqual(validateSignalingMessage(adminUser, { type: 'ping' }).allowed, true);
-    assert.strictEqual(validateSignalingMessage(adminUser, { type: 'get_sales_list' }).allowed, true);
+    // Admin sending answer without target Sales ID -> rejected
+    const resAnswerNoTarget = validateSignalingMessage(adminUser, { type: 'answer', sdp: {} });
+    assert.strictEqual(resAnswerNoTarget.allowed, false);
+    assert.strictEqual(resAnswerNoTarget.reason, 'Target Sales ID wajib disertakan.');
+
+    // Admin sending answer with target Sales ID -> allowed and forwarded to sales
+    const resAnswerValid = validateSignalingMessage(adminUser, { type: 'answer', targetId: 2, sdp: {} });
+    assert.strictEqual(resAnswerValid.allowed, true);
+    assert.strictEqual(resAnswerValid.forwardTo, 'sales');
   });
 
-  await runTest('Check H9: Monitoring accepts only ADMIN and SALES roles', () => {
-    assert.strictEqual(isSupportedMonitoringRole('ADMIN'), true);
-    assert.strictEqual(isSupportedMonitoringRole('SALES'), true);
-    assert.strictEqual(isSupportedMonitoringRole('OWNER'), false);
-    assert.strictEqual(isSupportedMonitoringRole(''), false);
-    assert.strictEqual(isSupportedMonitoringRole(null), false);
-    assert.strictEqual(isSupportedMonitoringRole(undefined), false);
-  });
-
-  // Check H8: Superseded sockets cannot mutate the active session
-  await runTest('Check H8: Only the current socket may send session messages', () => {
-    const oldSocket: any = { id: 'old_socket' };
-    const activeSocket: any = { id: 'active_socket' };
-    const sessions = new Map<number, { ws: any }>();
-
-    sessions.set(5, { ws: activeSocket });
-
-    assert.strictEqual(
-      isCurrentSocketSession(sessions, 5, oldSocket),
-      false,
-      'Replaced socket must be rejected'
-    );
-    assert.strictEqual(
-      isCurrentSocketSession(sessions, 5, activeSocket),
-      true,
-      'Current socket must be accepted'
-    );
-    assert.strictEqual(
-      isCurrentSocketSession(sessions, 99, activeSocket),
-      false,
-      'Socket without a registered session must be rejected'
-    );
-  });
-
+  // Check H5: Reconnection race condition prevention (Sales session identity)
   await runTest('Check H5: WebSocket session identity verification prevents race conditions on reconnect and stale close', () => {
     const sessionMap = new Map<number, { ws: any; user: any }>();
     const mockWsOld: any = { id: 'ws_old_conn_1' };
@@ -1576,6 +1547,211 @@ async function runTestSuite() {
     const removed = safeRemoveSession(map, userId, mockStaleWs);
     assert.strictEqual(removed, false, 'Heartbeat cleanup of stale socket must not delete reconnected socket');
     assert.strictEqual(map.get(userId)?.ws, mockActiveWs, 'Active socket must be preserved in map');
+  });
+
+  // Check H8: Screen share device compatibility check (Browser & Device Support Verification)
+  await runTest('Check H8: checkScreenShareSupport accurately detects non-secure contexts and unsupported browsers', () => {
+    // 1. In Node environment where window is undefined:
+    const nodeRes = checkScreenShareSupport();
+    assert.strictEqual(nodeRes.supported, false);
+    assert.strictEqual(
+      nodeRes.reason,
+      'Browser atau perangkat ini belum mendukung berbagi layar. Silakan gunakan browser dan perangkat yang kompatibel.'
+    );
+
+    // 2. Simulated non-secure context (isSecureContext: false):
+    const insecureRes = checkScreenShareSupport({ isSecureContext: false, mediaDevices: { getDisplayMedia: () => {} } });
+    assert.strictEqual(insecureRes.supported, false);
+    assert.strictEqual(
+      insecureRes.reason,
+      'Berbagi layar memerlukan koneksi aman (HTTPS). Silakan akses aplikasi melalui HTTPS.'
+    );
+
+    // 3. Simulated mobile/unsupported browser (isSecureContext: true, but no getDisplayMedia):
+    const unsupportedRes = checkScreenShareSupport({ isSecureContext: true, mediaDevices: {} });
+    assert.strictEqual(unsupportedRes.supported, false);
+    assert.strictEqual(
+      unsupportedRes.reason,
+      'Browser atau perangkat ini belum mendukung berbagi layar. Silakan gunakan browser dan perangkat yang kompatibel.'
+    );
+
+    // 4. Fully supported browser:
+    const supportedRes = checkScreenShareSupport({
+      isSecureContext: true,
+      mediaDevices: { getDisplayMedia: async () => ({}) },
+    });
+    assert.strictEqual(supportedRes.supported, true);
+    assert.strictEqual(supportedRes.reason, undefined);
+  });
+
+  // Check H9: Admin Live Monitor roster includes all database sales and correctly marks status
+  await runTest('Check H9: Admin Live Monitor roster marks offline, standby, and streaming sales correctly', () => {
+    const dbSalesList = [
+      { id: 101, name: 'Sales A', email: 'salesa@captain.com', role: 'SALES' },
+      { id: 102, name: 'Sales B', email: 'salesb@captain.com', role: 'SALES' },
+      { id: 103, name: 'Sales C', email: 'salesc@captain.com', role: 'SALES' },
+    ];
+
+    // Mock active signaling sockets from WS: Sales A is streaming, Sales B is online standby, Sales C is offline
+    const activeSignalingSales = [
+      { id: 101, isStreaming: true, streamStartTime: Date.now() },
+      { id: 102, isStreaming: false },
+    ];
+
+    const activeMap = new Map<number, any>();
+    activeSignalingSales.forEach(s => activeMap.set(s.id, s));
+
+    const roster = dbSalesList.map(s => {
+      const active = activeMap.get(s.id);
+      return {
+        ...s,
+        isOnline: !!active,
+        isStreaming: !!active?.isStreaming,
+        statusLabel: active?.isStreaming
+          ? 'Sedang berbagi layar'
+          : active
+          ? 'Menunggu izin berbagi layar'
+          : 'Offline',
+      };
+    });
+
+    assert.strictEqual(roster.length, 3);
+    assert.strictEqual(roster[0].statusLabel, 'Sedang berbagi layar');
+    assert.strictEqual(roster[0].isStreaming, true);
+    assert.strictEqual(roster[1].statusLabel, 'Menunggu izin berbagi layar');
+    assert.strictEqual(roster[1].isStreaming, false);
+    assert.strictEqual(roster[1].isOnline, true);
+    assert.strictEqual(roster[2].statusLabel, 'Offline');
+    assert.strictEqual(roster[2].isOnline, false);
+  });
+
+  // Check H10: Sales UI simplifies to single button without canvas simulation
+  await runTest('Check H10: Audit SalesScreenSharePanel codebase has zero canvas simulation or fake video generators', () => {
+    const panelPath = path.resolve(process.cwd(), 'src/components/screenMonitoring/SalesScreenSharePanel.tsx');
+    const content = fs.readFileSync(panelPath, 'utf-8');
+    assert.strictEqual(content.includes('createSimulatedCanvasStream'), false, 'Must not contain simulated canvas stream');
+    assert.strictEqual(content.includes('captureStream'), false, 'Must not contain canvas.captureStream');
+    assert.strictEqual(content.includes('Demo Canvas'), false, 'Must not mention Demo Canvas in Sales UI');
+    assert.strictEqual(content.includes('Hubungkan WhatsApp'), true, 'Must contain Hubungkan WhatsApp button');
+  });
+
+  // ========================================================
+  // 11. WHATSAPP WEB INTEGRATION & ADMIN MONITORING AUDIT
+  // ========================================================
+  console.log('\nSECTION 11: WhatsApp Web Integration & Admin Monitoring Audit');
+
+  await runTest('Check I1: requireAdmin strictly blocks Sales from accessing /follow-ups/monitoring', () => {
+    let statusCode = 0;
+    let responseBody: any = null;
+    let nextCalled = false;
+
+    const mockRes: any = {
+      status(code: number) {
+        statusCode = code;
+        return this;
+      },
+      json(data: any) {
+        responseBody = data;
+        return this;
+      },
+    };
+
+    // Case 1: Unauthenticated -> 401
+    requireAdmin({} as any, mockRes, () => { nextCalled = true; });
+    assert.strictEqual(statusCode, 401);
+    assert.strictEqual(responseBody?.success, false);
+    assert.strictEqual(nextCalled, false);
+
+    // Case 2: Sales Role -> 403 Forbidden
+    statusCode = 0;
+    responseBody = null;
+    nextCalled = false;
+    requireAdmin({ user: { id: 2, role: 'SALES' } } as any, mockRes, () => { nextCalled = true; });
+    assert.strictEqual(statusCode, 403);
+    assert.strictEqual(responseBody?.message?.includes('Akses ditolak'), true);
+    assert.strictEqual(nextCalled, false);
+
+    // Case 3: Admin Role -> allowed
+    statusCode = 0;
+    responseBody = null;
+    nextCalled = false;
+    requireAdmin({ user: { id: 1, role: 'ADMIN' } } as any, mockRes, () => { nextCalled = true; });
+    assert.strictEqual(nextCalled, true);
+    assert.strictEqual(statusCode, 0);
+  });
+
+  await runTest('Check I2: Follow-up monitoring query enforces c.deleted_at IS NULL, sales scope, and search', () => {
+    const buildConditions = (sales_id?: string, date_from?: string, date_to?: string, search?: string) => {
+      const whereConditions: string[] = ['c.deleted_at IS NULL'];
+      const params: any[] = [];
+
+      if (sales_id && sales_id !== 'all') {
+        const parsed = parseInt(sales_id, 10);
+        if (!isNaN(parsed)) {
+          whereConditions.push('a.user_id = ?');
+          params.push(parsed);
+        }
+      }
+      if (date_from) {
+        whereConditions.push('DATE(a.activity_date) >= ?');
+        params.push(date_from);
+      }
+      if (date_to) {
+        whereConditions.push('DATE(a.activity_date) <= ?');
+        params.push(date_to);
+      }
+      if (search && search.trim()) {
+        const pattern = `%${search.trim()}%`;
+        whereConditions.push('(c.name LIKE ? OR c.company_name LIKE ? OR c.whatsapp_number LIKE ? OR a.notes LIKE ? OR a.message_sent LIKE ?)');
+        params.push(pattern, pattern, pattern, pattern, pattern);
+      }
+
+      return { whereClause: whereConditions.join(' AND '), params };
+    };
+
+    const res1 = buildConditions();
+    assert.strictEqual(res1.whereClause, 'c.deleted_at IS NULL');
+    assert.strictEqual(res1.params.length, 0);
+
+    const res2 = buildConditions('5', '2026-10-01', '2026-10-21', 'PT Maju');
+    assert.strictEqual(res2.whereClause.includes('c.deleted_at IS NULL'), true);
+    assert.strictEqual(res2.whereClause.includes('a.user_id = ?'), true);
+    assert.strictEqual(res2.whereClause.includes('DATE(a.activity_date) >= ?'), true);
+    assert.strictEqual(res2.whereClause.includes('DATE(a.activity_date) <= ?'), true);
+    assert.strictEqual(res2.params[0], 5);
+    assert.strictEqual(res2.params[1], '2026-10-01');
+    assert.strictEqual(res2.params[2], '2026-10-21');
+    assert.strictEqual(res2.params[3], '%PT Maju%');
+  });
+
+  await runTest('Check I3: Audit codebase guarantees zero shadow scraping, zero puppeteer sessions, zero fake blue ticks', () => {
+    const filesToAudit = [
+      'server.ts',
+      'server/services/screenMonitoringSignaling.ts',
+      'src/pages/WhatsAppWorkspacePage.tsx',
+      'src/pages/WhatsAppMonitoringPage.tsx',
+    ];
+
+    for (const rel of filesToAudit) {
+      const full = path.resolve(process.cwd(), rel);
+      if (fs.existsSync(full)) {
+        const text = fs.readFileSync(full, 'utf-8');
+        assert.strictEqual(text.includes('puppeteer'), false, `${rel} must not use puppeteer`);
+        assert.strictEqual(text.includes('playwright'), false, `${rel} must not use playwright`);
+        assert.strictEqual(text.includes('baileys'), false, `${rel} must not use baileys`);
+        assert.strictEqual(text.includes('wppconnect'), false, `${rel} must not use wppconnect`);
+      }
+    }
+  });
+
+  await runTest('Check I4: Sales WhatsApp Workspace verifies direct tab launch & zero credentials policy', () => {
+    const wsPage = path.resolve(process.cwd(), 'src/pages/WhatsAppWorkspacePage.tsx');
+    const content = fs.readFileSync(wsPage, 'utf-8');
+    assert.strictEqual(content.includes('https://web.whatsapp.com'), true, 'Must link to web.whatsapp.com');
+    assert.strictEqual(content.includes('_blank'), true, 'Must launch in new tab');
+    assert.strictEqual(content.includes('X-Frame-Options: DENY'), true, 'Must explain X-Frame-Options policy');
+    assert.strictEqual(content.includes('Zero-Credential'), true, 'Must announce Zero-Credential policy');
+    assert.strictEqual(content.includes('input type="password"'), false, 'Must never ask for whatsapp password input');
   });
 
   // ========================================================

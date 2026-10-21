@@ -21,6 +21,9 @@ import { TrashPage } from './pages/TrashPage.js';
 import { TransactionsPage } from './pages/TransactionsPage.js';
 import { SalesManagementPage } from './pages/SalesManagementPage.js';
 import { ScreenMonitoringPage } from './pages/ScreenMonitoringPage.js';
+import { SalesWhatsAppConnectPage } from './pages/SalesWhatsAppConnectPage.js';
+import { WhatsAppWorkspacePage } from './pages/WhatsAppWorkspacePage.js';
+import { WhatsAppMonitoringPage } from './pages/WhatsAppMonitoringPage.js';
 
 // Modals
 import { CustomerFormModal } from './components/customers/CustomerFormModal.js';
@@ -133,8 +136,14 @@ const MainApp: React.FC = () => {
         return 'Agenda Follow-Up';
       case 'templates':
         return 'Template WhatsApp';
+      case 'wa_workspace':
+        return 'WhatsApp Web Workspace (Sales)';
+      case 'wa_monitoring':
+        return 'Monitoring Follow-Up WhatsApp (Admin)';
       case 'screen_monitoring':
         return 'Live Monitor WhatsApp Web (Admin)';
+      case 'connect_wa':
+        return 'Live Screen WhatsApp';
       case 'sales_mgmt':
         return 'Kelola Akun Sales';
       case 'rules':
@@ -172,6 +181,7 @@ const MainApp: React.FC = () => {
               onOpenFollowUpModal={handleOpenFollowUp}
               onNavigateToCustomers={() => setCurrentTab('customers')}
               onNavigateToTransactions={() => setCurrentTab('transactions')}
+              onNavigateToWhatsAppWeb={() => setCurrentTab('wa_workspace')}
             />
           )}
 
@@ -198,7 +208,19 @@ const MainApp: React.FC = () => {
 
           {currentTab === 'templates' && <WhatsAppTemplatesPage />}
 
+          {currentTab === 'wa_workspace' && !isAdmin && (
+            <WhatsAppWorkspacePage
+              onOpenFollowUpModal={handleOpenFollowUp}
+              onNavigateToDashboard={() => setCurrentTab('dashboard')}
+              onNavigateToCustomers={() => setCurrentTab('customers')}
+            />
+          )}
+
+          {currentTab === 'wa_monitoring' && isAdmin && <WhatsAppMonitoringPage />}
+
           {currentTab === 'screen_monitoring' && isAdmin && <ScreenMonitoringPage />}
+
+          {currentTab === 'connect_wa' && !isAdmin && <SalesWhatsAppConnectPage />}
 
           {currentTab === 'sales_mgmt' && isAdmin && <SalesManagementPage />}
 

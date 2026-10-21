@@ -20,7 +20,7 @@ export async function getDashboardStats(req: AuthenticatedRequest, res: Response
 
     // 1. Fetch active customers with statuses and assigned sales
     const custSql = `
-      SELECT 
+      SELECT
         c.*,
         s.code AS status_code, s.label AS status_label, s.color_code AS status_color_code,
         u.name AS sales_name
@@ -125,7 +125,7 @@ export async function getDashboardStats(req: AuthenticatedRequest, res: Response
     let omzetBySales: any[] = [];
     if (!isSales) {
       const [salesUsers] = await pool.query<any[]>(
-        `SELECT 
+        `SELECT
           u.id AS sales_id, u.name AS sales_name,
           COALESCE(SUM(CASE WHEN t.status = 'CLOSING' THEN t.amount ELSE 0 END), 0) AS omzet,
           COUNT(CASE WHEN t.status = 'CLOSING' THEN 1 END) AS closing_count
@@ -373,7 +373,7 @@ export async function getCustomerActivities(req: AuthenticatedRequest, res: Resp
     }
 
     const sql = `
-      SELECT 
+      SELECT
         a.*,
         u.name AS user_name,
         t.title AS template_name
@@ -395,3 +395,115 @@ export async function getCustomerActivities(req: AuthenticatedRequest, res: Resp
     res.status(500).json({ success: false, message: 'Gagal memuat histori follow-up.' });
   }
 }
+
+/**
+ * Admin: Get comprehensive follow-up monitoring list across all sales and customers.
+ * Displays verified CRM communication records, real message contents, timestamps, and next follow-up dates.
+ */
+export async function getFollowUpMonitoringList(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const { sales_id, search, date_from, date_to, page = '1', limit = '50' } = req.query;
+
+    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 50));
+    const offset = (pageNum - 1) * limitNum;
+
+    const whereConditions: string[] = ['c.deleted_at IS NULL'];
+    const params: any[] = [];
+
+    if (sales_id && sales_id !== 'all') {
+      const parsedSalesId = parseInt(String(sales_id), 10);
+      if (!isNaN(parsedSalesId)) {
+        whereConditions.push('a.user_id = ?');
+        params.push(parsedSalesId);
+      }
+    }
+
+    if (date_from) {
+      whereConditions.push('DATE(a.activity_date) >= ?');
+      params.push(String(date_from));
+    }
+
+    if (date_to) {
+      whereConditions.push('DATE(a.activity_date) <= ?');
+      params.push(String(date_to));
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      const searchPattern = `%${search.trim()}%`;
+      whereConditions.push(
+        '(c.name LIKE ? OR c.company_name LIKE ? OR c.whatsapp_number LIKE ? OR a.notes LIKE ? OR a.message_sent LIKE ?)'
+      );
+      params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+    // Total count query
+    const countSql = `
+      SELECT COUNT(*) as total
+      FROM follow_up_activities a
+      JOIN customers c ON a.customer_id = c.id
+      ${whereClause}
+    `;
+    const [countRows] = await pool.query<any[]>(countSql, params);
+    const total = countRows[0]?.total || 0;
+
+    // Data query
+    const dataSql = `
+      SELECT
+        a.id,
+        a.customer_id,
+        a.user_id,
+        a.activity_date,
+        a.channel,
+        a.template_id,
+        a.message_sent,
+        a.result_status,
+        a.notes,
+        a.rule_step_executed,
+        a.previous_follow_up_date,
+        a.next_follow_up_date,
+        a.created_at,
+        c.name AS customer_name,
+        c.company_name,
+        c.whatsapp_number,
+        c.pic_name,
+        c.city,
+        u.name AS sales_name,
+        u.email AS sales_email,
+        t.title AS template_name,
+        cs.code AS customer_status_code,
+        cs.label AS customer_status_label,
+        cs.color_code AS customer_status_color
+      FROM follow_up_activities a
+      JOIN customers c ON a.customer_id = c.id
+      LEFT JOIN users u ON a.user_id = u.id
+      LEFT JOIN whatsapp_templates t ON a.template_id = t.id
+      LEFT JOIN customer_statuses cs ON c.status_id = cs.id
+      ${whereClause}
+      ORDER BY a.activity_date DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const [rows] = await pool.query<any[]>(dataSql, [...params, limitNum, offset]);
+
+    res.json({
+      success: true,
+      data: {
+        activities: rows,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(total / limitNum) || 1,
+        },
+        audit_note: 'Data aktivitas komunikasi WhatsApp bersumber dari log CRM terverifikasi.',
+      },
+    });
+  } catch (err: any) {
+    console.error('[FollowUp getFollowUpMonitoringList error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memuat log monitoring follow-up.' });
+  }
+}
+

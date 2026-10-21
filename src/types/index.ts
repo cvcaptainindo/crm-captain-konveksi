@@ -97,6 +97,19 @@ export interface FollowUpActivity {
   created_at: string;
 }
 
+export interface FollowUpMonitoringItem extends FollowUpActivity {
+  customer_name?: string;
+  company_name?: string;
+  whatsapp_number?: string;
+  pic_name?: string;
+  city?: string;
+  sales_name?: string;
+  sales_email?: string;
+  customer_status_code?: string;
+  customer_status_label?: string;
+  customer_status_color?: string;
+}
+
 export interface Transaction {
   id: number;
   customer_id: number;

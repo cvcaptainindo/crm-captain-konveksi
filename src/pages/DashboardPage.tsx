@@ -16,6 +16,7 @@ import {
   Eye,
   RefreshCw,
   DollarSign,
+  MessageSquare,
 } from 'lucide-react';
 
 interface DashboardPageProps {
@@ -23,6 +24,7 @@ interface DashboardPageProps {
   onOpenFollowUpModal: (customer: Customer) => void;
   onNavigateToCustomers: () => void;
   onNavigateToTransactions?: () => void;
+  onNavigateToWhatsAppWeb?: () => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
@@ -30,6 +32,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   onOpenFollowUpModal,
   onNavigateToCustomers,
   onNavigateToTransactions,
+  onNavigateToWhatsAppWeb,
 }) => {
   const { showToast } = useToast();
   const { isAdmin } = useAuth();
@@ -85,14 +88,27 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={onNavigateToCustomers}
-          className="self-stretch sm:self-auto min-h-[44px] px-4 py-2.5 bg-neutral-900 hover:bg-neutral-800 active:bg-black text-white rounded-xl text-xs font-semibold shadow-2xs flex items-center justify-center gap-2 active:scale-98 transition-all"
-        >
-          <span>Semua Data Customer</span>
-          <ChevronRight className="w-4 h-4 text-neutral-400" />
-        </button>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          {!isAdmin && onNavigateToWhatsAppWeb && (
+            <button
+              type="button"
+              onClick={onNavigateToWhatsAppWeb}
+              className="min-h-[44px] px-4 py-2.5 bg-[#c5a059] hover:bg-[#b38f48] active:bg-[#9d7d3d] text-neutral-900 rounded-xl text-xs font-bold shadow-2xs flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>WhatsApp Web</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={onNavigateToCustomers}
+            className="min-h-[44px] px-4 py-2.5 bg-neutral-900 hover:bg-neutral-800 active:bg-black text-white rounded-xl text-xs font-semibold shadow-2xs flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
+          >
+            <span>Semua Data Customer</span>
+            <ChevronRight className="w-4 h-4 text-neutral-400" />
+          </button>
+        </div>
       </div>
 
       {/* For Sales: Dedicated Live Monitor WA Screen Sharing Panel */}
