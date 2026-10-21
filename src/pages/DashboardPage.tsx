@@ -3,7 +3,6 @@ import { Customer, DashboardStats } from '../types/index.js';
 import { apiRequest } from '../api/client.js';
 import { useAuth } from '../contexts/AuthContext.js';
 import { useToast } from '../contexts/ToastContext.js';
-import { SalesScreenSharePanel } from '../components/screenMonitoring/SalesScreenSharePanel.js';
 import {
   Users,
   Clock,
@@ -111,8 +110,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
       </div>
 
-      {/* For Sales: Dedicated Live Monitor WA Screen Sharing Panel */}
-      {!isAdmin && <SalesScreenSharePanel />}
 
       {/* KPI Cards Grid - Consistent Base Color (White Surface + Subtle Border + Gold Accent) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
