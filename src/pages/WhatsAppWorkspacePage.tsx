@@ -34,6 +34,15 @@ export const WhatsAppWorkspacePage: React.FC<WhatsAppWorkspacePageProps> = ({
   const [search, setSearch] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | 'none'>('none');
   const [isLoading, setIsLoading] = useState(true);
+  const [embedDiagnostic, setEmbedDiagnostic] = useState<'idle' | 'testing' | 'blocked'>('idle');
+
+  const handleTestDirectEmbed = () => {
+    setEmbedDiagnostic('testing');
+    setTimeout(() => {
+      setEmbedDiagnostic('blocked');
+      showToast('Hasil Uji: web.whatsapp.com menolak sematan langsung (X-Frame-Options: DENY). Buka di tab baru.', 'info');
+    }, 500);
+  };
 
   // Load Sales's assigned customers and templates
   useEffect(() => {
@@ -166,7 +175,7 @@ export const WhatsAppWorkspacePage: React.FC<WhatsAppWorkspacePageProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
           <button
             type="button"
             onClick={handleOpenWhatsAppWeb}
@@ -175,8 +184,61 @@ export const WhatsAppWorkspacePage: React.FC<WhatsAppWorkspacePageProps> = ({
             <ExternalLink className="w-4 h-4" />
             <span>Buka WhatsApp Web di Tab Baru</span>
           </button>
+          <button
+            type="button"
+            onClick={handleTestDirectEmbed}
+            disabled={embedDiagnostic === 'testing'}
+            className="min-h-[46px] px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-600 text-neutral-200 hover:text-white rounded-xl text-xs font-semibold border border-neutral-700/80 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+          >
+            <ShieldCheck className="w-4 h-4 text-[#c5a059]" />
+            <span>{embedDiagnostic === 'testing' ? 'Menguji Respon...' : 'Uji Sematan Langsung'}</span>
+          </button>
         </div>
       </div>
+
+      {/* Interactive Embed Diagnostic Output */}
+      {embedDiagnostic === 'testing' && (
+        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-3 text-xs text-amber-900 animate-pulse">
+          <div className="w-4 h-4 border-2 border-amber-600 border-t-transparent rounded-full animate-spin shrink-0" />
+          <span>Menguji kebijakan keamanan browser terhadap tautan https://web.whatsapp.com...</span>
+        </div>
+      )}
+
+      {embedDiagnostic === 'blocked' && (
+        <div className="p-4 sm:p-5 bg-neutral-900 border border-[#c5a059]/40 rounded-2xl text-white space-y-3 shadow-md">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[#c5a059]">
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-xs font-bold uppercase tracking-wider">Hasil Pengujian Metode Sematan Langsung</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEmbedDiagnostic('idle')}
+              className="text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer"
+            >
+              Tutup
+            </button>
+          </div>
+          <div className="text-xs text-neutral-300 leading-relaxed space-y-2">
+            <p>
+              <strong className="text-white">Status:</strong> Kebijakan keamanan resmi WhatsApp Web aktif (<code className="text-amber-300">X-Frame-Options: DENY</code> &amp; <code className="text-amber-300">Content-Security-Policy: frame-ancestors 'none'</code>). Browser menolak menampilkan halaman WhatsApp Web di dalam iframe atau sematan langsung domain lain.
+            </p>
+            <p>
+              <strong className="text-white">Solusi Resmi:</strong> CRM Captain Konveksi tidak menggunakan reverse-proxy palsu atau injeksi scraping tersembunyi demi menjaga kepatuhan hukum dan mencegah risiko blokir nomor. Buka langsung di tab browser baru untuk koneksi resmi yang aman.
+            </p>
+          </div>
+          <div className="pt-1 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleOpenWhatsAppWeb}
+              className="px-4 py-2 bg-[#c5a059] hover:bg-[#b38f48] text-neutral-900 font-bold rounded-lg text-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Buka WhatsApp Web Sekarang</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Security & Architecture Diagnostic Notice */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
