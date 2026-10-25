@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Customer, WhatsAppTemplate } from '../types/index.js';
+import { Customer, User, WhatsAppTemplate } from '../types/index.js';
 import { apiRequest } from '../api/client.js';
 import { useToast } from '../contexts/ToastContext.js';
+import { useAuth } from '../contexts/AuthContext.js';
 import {
   ExternalLink,
   MessageSquare,
@@ -29,7 +30,10 @@ export const WhatsAppWorkspacePage: React.FC<WhatsAppWorkspacePageProps> = ({
   onNavigateToCustomers,
 }) => {
   const { showToast } = useToast();
+  const { isAdmin } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [salesList, setSalesList] = useState<User[]>([]);
+  const [selectedSalesId, setSelectedSalesId] = useState('all');
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [search, setSearch] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | 'none'>('none');
@@ -44,31 +48,87 @@ export const WhatsAppWorkspacePage: React.FC<WhatsAppWorkspacePageProps> = ({
     }, 500);
   };
 
-  // Load Sales's assigned customers and templates
+  // Admin dapat memilih Sales; backend tetap menentukan hak akses customer.
   useEffect(() => {
+    if (!isAdmin) return;
+
+    let cancelled = false;
+
+    const fetchSales = async () => {
+      try {
+        const res = await apiRequest<{ success: boolean; data: User[] }>(
+          '/users/sales-management?status=ACTIVE'
+        );
+
+        if (!cancelled && res.success && Array.isArray(res.data)) {
+          setSalesList(
+            res.data.filter(
+              (u) => u.role === 'SALES' &&
+                u.account_status === 'ACTIVE' &&
+                u.is_active
+            )
+          );
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          showToast(err.message || 'Gagal memuat daftar Sales.', 'error');
+        }
+      }
+    };
+
+    fetchSales();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, showToast]);
+
+  // Load customer data and active templates.
+  useEffect(() => {
+    let cancelled = false;
+
     const fetchData = async () => {
       setIsLoading(true);
       try {
+        const customerQuery =
+          isAdmin && selectedSalesId !== 'all'
+            ? `/customers?limit=100&sales_id=${encodeURIComponent(selectedSalesId)}`
+            : '/customers?limit=100';
+
         const [resCust, resTpl] = await Promise.all([
-          apiRequest('/customers?limit=100'),
+          apiRequest<{ success: boolean; data: Customer[] }>(customerQuery),
           apiRequest('/templates'),
         ]);
 
-        if (resCust.success && resCust.data?.customers) {
-          setCustomers(resCust.data.customers);
-        }
-        if (resTpl.success && Array.isArray(resTpl.data)) {
-          setTemplates(resTpl.data.filter((t: WhatsAppTemplate) => t.is_active));
+        if (!cancelled) {
+          if (resCust.success && Array.isArray(resCust.data)) {
+            setCustomers(resCust.data);
+          } else {
+            setCustomers([]);
+          }
+
+          if (resTpl.success && Array.isArray(resTpl.data)) {
+            setTemplates(
+              resTpl.data.filter((t: WhatsAppTemplate) => t.is_active)
+            );
+          }
         }
       } catch (err: any) {
-        showToast('Gagal memuat data pelanggan untuk WhatsApp.', 'error');
+        if (!cancelled) {
+          setCustomers([]);
+          showToast('Gagal memuat data pelanggan untuk WhatsApp.', 'error');
+        }
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     fetchData();
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, selectedSalesId, showToast]);
 
   const handleOpenWhatsAppWeb = () => {
     window.open('https://web.whatsapp.com', '_blank', 'noopener,noreferrer');
@@ -273,6 +333,22 @@ export const WhatsAppWorkspacePage: React.FC<WhatsAppWorkspacePageProps> = ({
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            {isAdmin && (
+              <select
+                aria-label="Pilih Sales untuk WhatsApp Workspace"
+                value={selectedSalesId}
+                onChange={(e) => setSelectedSalesId(e.target.value)}
+                className="text-xs px-3 py-2 bg-neutral-50 border border-neutral-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#c5a059]/40 min-h-[40px]"
+              >
+                <option value="all">Semua Sales</option>
+                {salesList.map((sales) => (
+                  <option key={sales.id} value={String(sales.id)}>
+                    {sales.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
             {/* Template Selector */}
             <select
               value={selectedTemplateId}

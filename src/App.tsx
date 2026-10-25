@@ -205,7 +205,7 @@ const MainApp: React.FC = () => {
 
           {currentTab === 'templates' && <WhatsAppTemplatesPage />}
 
-          {currentTab === 'wa_workspace' && !isAdmin && (
+          {currentTab === 'wa_workspace' && (
             <WhatsAppWorkspacePage
               onOpenFollowUpModal={handleOpenFollowUp}
               onNavigateToDashboard={() => setCurrentTab('dashboard')}
