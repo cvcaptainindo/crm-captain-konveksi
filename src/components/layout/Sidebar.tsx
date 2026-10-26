@@ -57,7 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'transactions' as NavTab, label: 'Transaksi & Omzet', icon: DollarSign, adminOnly: false },
     { id: 'schedule' as NavTab, label: 'Agenda Follow-Up', icon: CalendarClock, adminOnly: false },
     { id: 'templates' as NavTab, label: 'WhatsApp Templates', icon: MessageSquareText, adminOnly: false },
-    { id: 'wa_workspace' as NavTab, label: 'WhatsApp Web', icon: MessageSquare, adminOnly: false },
+    { id: 'wa_workspace' as NavTab, label: 'WhatsApp Web', icon: MessageSquare, adminOnly: false, salesOnly: true },
 
     { id: 'wa_monitoring' as NavTab, label: 'Monitoring Follow-Up WA', icon: FileText, adminOnly: true },
     { id: 'sales_mgmt' as NavTab, label: 'Kelola Akun Sales', icon: UserCheck, adminOnly: true },
