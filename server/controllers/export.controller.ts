@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { pool } from '../database/db.js';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
-import { determineFollowUpCategory, calculateDaysSinceContact } from '../services/followUpEngine.js';
+import { determineFollowUpCategory, calculateDaysSinceContact, getTodayDateString, getStartOfWeekDateString } from '../services/followUpEngine.js';
 import { generateCustomerExport, generateActivityExport, generateTransactionExport } from '../services/exportService.js';
 import { logAudit } from '../services/auditLogger.js';
 
@@ -146,7 +146,7 @@ export async function exportActivities(req: AuthenticatedRequest, res: Response)
 }
 
 export async function exportTransactions(req: AuthenticatedRequest, res: Response): Promise<void> {
-  const { format = 'xlsx', sales_id, status, period, start_date, end_date } = req.query;
+  const { format = 'xlsx', sales_id, status, period, start_date, end_date, search } = req.query;
 
   try {
     const conditions: string[] = ['1=1'];
@@ -165,17 +165,13 @@ export async function exportTransactions(req: AuthenticatedRequest, res: Respons
       params.push(status);
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
-    const now = new Date();
+    const todayStr = getTodayDateString();
 
     if (period === 'today') {
       conditions.push('t.transaction_date = ?');
       params.push(todayStr);
     } else if (period === 'this_week') {
-      const dayOfWeek = now.getDay() || 7;
-      const monday = new Date(now);
-      monday.setDate(now.getDate() - dayOfWeek + 1);
-      const mondayStr = monday.toISOString().split('T')[0];
+      const mondayStr = getStartOfWeekDateString(todayStr);
       conditions.push('t.transaction_date >= ? AND t.transaction_date <= ?');
       params.push(mondayStr, todayStr);
     } else if (period === 'this_month') {
@@ -191,6 +187,17 @@ export async function exportTransactions(req: AuthenticatedRequest, res: Respons
         conditions.push('t.transaction_date <= ?');
         params.push(end_date);
       }
+    }
+
+    if (search && typeof search === 'string' && search.trim() !== '') {
+      const q = `%${search.trim().toLowerCase()}%`;
+      conditions.push(`(
+        LOWER(t.product) LIKE ? OR
+        LOWER(COALESCE(t.description, '')) LIKE ? OR
+        LOWER(COALESCE(c.name, '')) LIKE ? OR
+        LOWER(COALESCE(c.company_name, '')) LIKE ?
+      )`);
+      params.push(q, q, q, q);
     }
 
     const whereClause = conditions.join(' AND ');

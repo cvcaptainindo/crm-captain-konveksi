@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Transaction, User } from '../types/index.js';
 import { useAuth } from '../contexts/AuthContext.js';
 import { useToast } from '../contexts/ToastContext.js';
-import { apiRequest } from '../api/client.js';
+import { apiRequest, downloadBlob } from '../api/client.js';
 import { TransactionFormModal } from '../components/transactions/TransactionFormModal.js';
 import { ConfirmModal } from '../components/common/ConfirmModal.js';
 import {
@@ -144,40 +144,40 @@ export const TransactionsPage: React.FC = () => {
     }
   };
 
-  const handleExport = (format: 'xlsx' | 'csv') => {
+  const handleExport = async (format: 'xlsx' | 'csv') => {
     const params = new URLSearchParams();
     params.append('format', format);
     if (period !== 'all') params.append('period', period);
     if (selectedSalesId !== 'all') params.append('sales_id', selectedSalesId);
     if (statusFilter !== 'all') params.append('status', statusFilter);
+    if (search.trim()) params.append('search', search.trim());
+
     if (period === 'custom') {
       if (startDate) params.append('start_date', startDate);
       if (endDate) params.append('end_date', endDate);
     }
 
-    const token = localStorage.getItem('crm_token');
-    const url = `/api/export/transactions?${params.toString()}`;
+    try {
+      const blob = await apiRequest<Blob>(
+        `/export/transactions?${params.toString()}`
+      );
 
-    // Trigger download using fetch with token
-    fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-      .then(res => res.blob())
-      .then(blob => {
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = `Laporan_Closing_${new Date().toISOString().slice(0, 10)}.${format}`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        showToast(`Export ${format.toUpperCase()} berhasil diunduh.`, 'success');
-      })
-      .catch(() => {
-        showToast('Gagal mengunduh file laporan.', 'error');
-      });
+      if (!(blob instanceof Blob) || blob.size === 0) {
+        throw new Error('File laporan kosong atau format respons tidak valid.');
+      }
+
+      const dateParts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Jakarta',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+
+      downloadBlob(blob, `Laporan_Transaksi_${dateParts}.${format}`);
+      showToast(`Export ${format.toUpperCase()} berhasil diunduh.`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Gagal mengunduh file laporan.', 'error');
+    }
   };
 
   return (

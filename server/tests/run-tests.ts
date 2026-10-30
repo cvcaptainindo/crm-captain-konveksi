@@ -14,6 +14,7 @@ import {
   calculateDaysDifference,
   calculateDaysSinceContact,
   getTodayDateString,
+  getStartOfWeekDateString,
 } from '../services/followUpEngine.js';
 import * as XLSX from 'xlsx';
 import { parseTemplate, sanitizeWhatsAppPhone, buildWhatsAppLink } from '../services/templateParser.js';
@@ -650,6 +651,14 @@ async function runTestSuite() {
     assert.strictEqual(determineFollowUpCategory('2020-01-01', 'INACTIVE'), 'COMPLETED');
   });
 
+  await runTest('Regression: awal minggu selalu Senin dan benar saat pergantian bulan/tahun', () => {
+    assert.strictEqual(getStartOfWeekDateString('2026-10-26'), '2026-10-26');
+    assert.strictEqual(getStartOfWeekDateString('2026-10-27'), '2026-10-26');
+    assert.strictEqual(getStartOfWeekDateString('2026-11-01'), '2026-10-26');
+    assert.strictEqual(getStartOfWeekDateString('2026-01-01'), '2025-12-29');
+    assert.strictEqual(getStartOfWeekDateString('2026-03-01'), '2026-02-23');
+  });
+
   await runTest('Company standard 4-step follow-up intervals', () => {
     const rules = [
       { id: 1, step_number: 1, name: 'Step 1', interval_days: 3, is_active: true, description: '', created_at: '', updated_at: '' },
@@ -954,6 +963,55 @@ async function runTestSuite() {
     // Admin explicit include_trash
     const adminWithTrash = buildExportActivitiesWhere('ADMIN', 1, undefined, 'true');
     assert.strictEqual(adminWithTrash.includes('c.deleted_at IS NULL'), false, 'Admin can include trash when explicitly asked');
+  });
+
+  await runTest('Regression: export transaksi mempertahankan filter pencarian dan query terparameterisasi', () => {
+    const exportSource = fs.readFileSync(
+      path.resolve(process.cwd(), 'server/controllers/export.controller.ts'),
+      'utf-8'
+    );
+    const transactionSource = fs.readFileSync(
+      path.resolve(process.cwd(), 'server/controllers/transaction.controller.ts'),
+      'utf-8'
+    );
+
+    const searchFields = [
+      'LOWER(t.product) LIKE ?',
+      "LOWER(COALESCE(t.description, '')) LIKE ?",
+      "LOWER(COALESCE(c.name, '')) LIKE ?",
+      "LOWER(COALESCE(c.company_name, '')) LIKE ?",
+    ];
+
+    for (const field of searchFields) {
+      assert.strictEqual(exportSource.includes(field), true, `Export harus mendukung: ${field}`);
+      assert.strictEqual(transactionSource.includes(field), true, `Daftar transaksi harus mendukung: ${field}`);
+    }
+
+    assert.strictEqual(
+      exportSource.includes('params.push(q, q, q, q)'),
+      true,
+      'Nilai pencarian harus dikirim melalui parameter SQL'
+    );
+    assert.strictEqual(
+      exportSource.includes('LEFT JOIN customers c ON t.customer_id = c.id'),
+      true,
+      'Export harus menghubungkan data customer'
+    );
+    assert.strictEqual(
+      exportSource.includes("conditions.push('t.sales_id = ?')"),
+      true,
+      'Export harus membatasi data Sales berdasarkan user login'
+    );
+    assert.strictEqual(
+      exportSource.includes('getStartOfWeekDateString(todayStr)'),
+      true,
+      'Export harus menggunakan awal minggu yang sama'
+    );
+    assert.strictEqual(
+      transactionSource.includes('getStartOfWeekDateString(todayStr)'),
+      true,
+      'Daftar transaksi harus menggunakan awal minggu yang sama'
+    );
   });
 
   // BUG-05: Transaction amount validation in updateTransaction

@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { pool, withTransaction, Transaction } from '../database/db.js';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
 import { logAudit } from '../services/auditLogger.js';
+import { getTodayDateString, getStartOfWeekDateString } from '../services/followUpEngine.js';
 
 /**
  * Strictly validates that an input string is in 'YYYY-MM-DD' format and represents an authentic calendar date.
@@ -66,17 +67,13 @@ export async function getTransactions(req: AuthenticatedRequest, res: Response):
     }
 
     // 4. Filter by Date / Period
-    const todayStr = new Date().toISOString().split('T')[0];
-    const now = new Date();
+    const todayStr = getTodayDateString();
 
     if (period === 'today') {
       conditions.push('t.transaction_date = ?');
       params.push(todayStr);
     } else if (period === 'this_week') {
-      const dayOfWeek = now.getDay() || 7;
-      const monday = new Date(now);
-      monday.setDate(now.getDate() - dayOfWeek + 1);
-      const mondayStr = monday.toISOString().split('T')[0];
+      const mondayStr = getStartOfWeekDateString(todayStr);
       conditions.push('t.transaction_date >= ? AND t.transaction_date <= ?');
       params.push(mondayStr, todayStr);
     } else if (period === 'this_month') {
@@ -396,7 +393,7 @@ export async function deleteTransaction(req: AuthenticatedRequest, res: Response
 export async function getOmzetOverview(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const isSales = req.user?.role === 'SALES';
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayDateString();
     const currentMonth = todayStr.substring(0, 7);
 
     // 1. Customer summary

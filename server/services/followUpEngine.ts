@@ -8,6 +8,13 @@ export function getTodayDateString(): string {
   return formatter.format(now);
 }
 
+export function getStartOfWeekDateString(todayStr: string = getTodayDateString()): string {
+  const date = new Date(`${todayStr}T00:00:00.000Z`);
+  const dayOfWeek = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() - dayOfWeek + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 export function calculateDaysDifference(fromDateStr: string, toDateStr: string): number {
   if (!fromDateStr || !toDateStr) return 0;
   const from = new Date(fromDateStr + 'T00:00:00Z');
