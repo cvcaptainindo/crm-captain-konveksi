@@ -32,6 +32,31 @@ interface CustomersPageProps {
   onDeleteCustomer: (customer: Customer) => void;
 }
 
+// Format timestamp database sebagai waktu WIB (Asia/Jakarta).
+const formatCustomerCreatedAt = (value?: string | null): string => {
+  if (!value) return '-';
+
+  // MySQL dateStrings menghasilkan YYYY-MM-DD HH:mm:ss.
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const date = new Date(
+    normalized.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(normalized)
+      ? normalized
+      : `${normalized}+07:00`
+  );
+
+  if (Number.isNaN(date.getTime())) return '-';
+
+  return new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date) + ' WIB';
+};
+
 export const CustomersPage: React.FC<CustomersPageProps> = ({
   statuses,
   salesList,
@@ -381,6 +406,12 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                     {/* Metadata Box: Status, Last Contact, Next Follow-Up, PIC */}
                     <div className="p-2.5 bg-neutral-50/80 rounded-xl border border-neutral-100 text-xs space-y-1 font-mono">
                       <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-neutral-500 font-sans">Tanggal Masuk:</span>
+                        <span className="text-neutral-700 font-semibold">
+                          {formatCustomerCreatedAt(c.created_at)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px]">
                         <span className="text-neutral-500 font-sans">Last Contact:</span>
                         <span className="text-neutral-700">
                           {c.last_contact_date || 'Belum ada'} ({c.days_since_contact} hari lalu)
@@ -467,6 +498,9 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                         </div>
                         <div className="text-[11px] text-neutral-500">{c.company_name || '-'}</div>
                         <div className="text-[10px] font-mono text-neutral-400 mt-0.5">{c.customer_code}</div>
+                        <div className="text-[10px] text-neutral-500 mt-0.5">
+                          Masuk: {formatCustomerCreatedAt(c.created_at)}
+                        </div>
                       </td>
 
                       <td className="py-3 px-4">
