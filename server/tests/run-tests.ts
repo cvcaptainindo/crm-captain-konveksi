@@ -20,6 +20,7 @@ import * as XLSX from 'xlsx';
 import { parseTemplate, sanitizeWhatsAppPhone, buildWhatsAppLink } from '../services/templateParser.js';
 import { generateCustomerExport, generateActivityExport, generateTransactionExport, sanitizeSpreadsheetCell } from '../services/exportService.js';
 import { isValidCalendarDate } from '../controllers/transaction.controller.js';
+import { calculateDocumentTotals } from '../controllers/document.controller.js';
 import { validateTemplateForPreview } from '../controllers/template.controller.js';
 import { requireAdmin } from '../middlewares/rbac.middleware.js';
 
@@ -47,6 +48,26 @@ async function runTestSuite() {
   console.log('CRM CAPTAIN KONVEKSI V1.0 - AUTOMATED TEST SUITE');
   console.log('Testing MySQL Migration, Security, RBAC & Core Logic');
   console.log('========================================================\n');
+
+  // ========================================================
+  // INVOICE CORE CALCULATION REGRESSION TESTS
+  // ========================================================
+  await runTest('Invoice totals calculate line items, discount, and tax accurately', () => {
+    const totals = calculateDocumentTotals([
+      { quantity: 10, unit_price: 12500 },
+      { quantity: 2, unit_price: 25000 },
+    ], 5000, 2500);
+    assert.deepStrictEqual(totals, { subtotal: 175000, discount: 5000, tax: 2500, total_amount: 172500, total_qty: 12 });
+  });
+
+  await runTest('Invoice totals reject discounts above subtotal', () => {
+    assert.throws(() => calculateDocumentTotals([{ quantity: 1, unit_price: 100 }], 101, 0), /diskon tidak boleh melebihi subtotal/i);
+  });
+
+  await runTest('Invoice totals reject negative quantity and price values', () => {
+    assert.throws(() => calculateDocumentTotals([{ quantity: -1, unit_price: 100 }]), /tidak boleh bernilai negatif/i);
+    assert.throws(() => calculateDocumentTotals([{ quantity: 1, unit_price: -1 }]), /tidak boleh bernilai negatif/i);
+  });
 
   // ========================================================
   // 1. CONFIGURATION & STARTUP VALIDATION

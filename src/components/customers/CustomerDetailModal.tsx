@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext.js';
 import { useToast } from '../../contexts/ToastContext.js';
 import { apiRequest } from '../../api/client.js';
 import { TransactionFormModal } from '../transactions/TransactionFormModal.js';
+import { InvoicePanel } from '../documents/InvoicePanel.js';
 import {
   X,
   PhoneCall,
@@ -306,6 +307,8 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   </div>
                 )}
               </div>
+
+              <InvoicePanel customer={customer} />
 
               {/* GROUP 3: INFORMASI DATA CUSTOMER LENGKAP */}
               <div className="p-4 rounded-2xl border border-neutral-200/80 bg-neutral-50/40 space-y-3">

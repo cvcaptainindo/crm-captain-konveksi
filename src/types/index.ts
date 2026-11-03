@@ -66,6 +66,7 @@ export interface Customer {
   activities?: FollowUpActivity[];
   transactions?: Transaction[];
   total_omzet?: number;
+  documents?: SalesDocument[];
 }
 
 export interface WhatsAppTemplate {
@@ -119,6 +120,7 @@ export interface Transaction {
   description: string;
   amount: number;
   status: 'CLOSING' | 'CANCEL';
+  invoice_id?: number | null;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -188,4 +190,85 @@ export interface DashboardStats {
     due_today: Customer[];
     upcoming: Customer[];
   };
+}
+
+
+export type DocType = 'QUOTATION' | 'INVOICE';
+export type DocStatus =
+  | 'DRAFT' | 'SENT' | 'APPROVED' | 'REJECTED' | 'EXPIRED' | 'CONVERTED'
+  | 'UNPAID' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'CANCELLED' | 'CLOSING' | 'CANCEL';
+
+export interface SalesDocumentItem {
+  id?: number;
+  document_id?: number;
+  item_order: number;
+  product_name: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  subtotal: number;
+  notes?: string;
+  created_at?: string;
+}
+
+export interface SalesDocumentPayment {
+  id: number;
+  document_id: number;
+  payment_date: string;
+  amount: number;
+  payment_method: string;
+  reference_number?: string | null;
+  notes?: string | null;
+  created_by?: number | null;
+  created_at?: string;
+}
+
+export interface SalesDocumentRefund {
+  id: number;
+  document_id: number;
+  refund_date?: string | null;
+  amount: number;
+  refund_method?: string | null;
+  reference_number?: string | null;
+  status: 'PENDING' | 'COMPLETED';
+  notes?: string | null;
+  created_by?: number | null;
+  created_at?: string;
+}
+
+export interface SalesDocument {
+  id: number;
+  doc_type: DocType;
+  doc_number: string;
+  customer_id: number;
+  sales_id: number;
+  doc_date: string;
+  valid_until?: string | null;
+  due_date?: string | null;
+  status: DocStatus;
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total_amount: number;
+  paid_amount?: number;
+  remaining_balance?: number;
+  total_qty: number;
+  notes?: string | null;
+  terms?: string | null;
+  quotation_id?: number | null;
+  transaction_id?: number | null;
+  created_at: string;
+  updated_at: string;
+  items?: SalesDocumentItem[];
+  payments?: SalesDocumentPayment[];
+  refunds?: SalesDocumentRefund[];
+  customer_name?: string;
+  customer_code?: string;
+  company_name?: string;
+  whatsapp_number?: string;
+  address?: string;
+  city?: string;
+  sales_name?: string;
+  sales_phone?: string;
+  sales_email?: string;
 }

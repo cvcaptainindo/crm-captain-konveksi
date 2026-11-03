@@ -286,6 +286,16 @@ export async function updateTransaction(req: AuthenticatedRequest, res: Response
 
     const trx = rows[0];
 
+    // Invoice-linked transactions are managed from the Invoice workflow only.
+    // Keep their amount, status, date, and audit history consistent with the source invoice.
+    if (trx.invoice_id !== undefined && trx.invoice_id !== null) {
+      res.status(409).json({
+        success: false,
+        message: 'Transaksi yang terhubung ke Invoice dikelola melalui menu Invoice dan tidak dapat diedit langsung.',
+      });
+      return;
+    }
+
     // Security: Sales can only edit transactions they own
     if (req.user?.role === 'SALES' && trx.sales_id !== req.user.id) {
       res.status(403).json({ success: false, message: 'Akses ditolak.' });
@@ -369,6 +379,15 @@ export async function deleteTransaction(req: AuthenticatedRequest, res: Response
     }
 
     const removed = rows[0];
+
+    // Never delete a closing record linked to an Invoice. Cancellation keeps history.
+    if (removed.invoice_id !== undefined && removed.invoice_id !== null) {
+      res.status(409).json({
+        success: false,
+        message: 'Transaksi yang terhubung ke Invoice tidak dapat dihapus. Batalkan melalui menu Invoice agar riwayat tetap tersimpan.',
+      });
+      return;
+    }
 
     await pool.execute('DELETE FROM transactions WHERE id = ?', [trxId]);
 

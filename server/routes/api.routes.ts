@@ -9,6 +9,7 @@ import * as tplCtrl from '../controllers/template.controller.js';
 import * as auditCtrl from '../controllers/audit.controller.js';
 import * as expCtrl from '../controllers/export.controller.js';
 import * as trxCtrl from '../controllers/transaction.controller.js';
+import * as docCtrl from '../controllers/document.controller.js';
 
 export const apiRouter = Router();
 
@@ -54,6 +55,28 @@ apiRouter.post('/customers', authMiddleware, custCtrl.createCustomer);
 apiRouter.get('/customers/:id', authMiddleware, custCtrl.getCustomerById);
 apiRouter.put('/customers/:id', authMiddleware, custCtrl.updateCustomer);
 apiRouter.delete('/customers/:id', authMiddleware, requireAdmin, custCtrl.softDeleteCustomer);
+
+// ========================================================
+// 4.1 INVOICE (Quotation menu intentionally not exposed in this phase)
+// ========================================================
+apiRouter.get('/documents/preview-number', authMiddleware, docCtrl.previewNextNumber);
+apiRouter.get('/documents/customer/:customerId', authMiddleware, docCtrl.getDocumentsByCustomer);
+apiRouter.get('/customers/:id/sales-documents', authMiddleware, docCtrl.getDocumentsByCustomer);
+apiRouter.get('/documents/:id/payments', authMiddleware, docCtrl.getPayments);
+apiRouter.post('/documents/:id/payments', authMiddleware, docCtrl.recordPayment);
+apiRouter.get('/documents/:id/refunds', authMiddleware, docCtrl.getDocumentRefunds);
+apiRouter.post('/documents/:id/refunds', authMiddleware, docCtrl.createDocumentRefund);
+apiRouter.patch('/documents/:id/refunds/:refundId', authMiddleware, docCtrl.completeDocumentRefund);
+apiRouter.post('/documents/:id/close', authMiddleware, docCtrl.closeInvoice);
+apiRouter.post('/documents/:id/cancel', authMiddleware, docCtrl.cancelInvoice);
+apiRouter.get('/documents', authMiddleware, docCtrl.getDocuments);
+apiRouter.post('/documents', authMiddleware, docCtrl.createDocument);
+apiRouter.get('/documents/:id', authMiddleware, docCtrl.getDocumentById);
+apiRouter.put('/documents/:id', authMiddleware, docCtrl.updateDocument);
+apiRouter.delete('/documents/:id', authMiddleware, docCtrl.deleteDocument);
+// Backward-compatible payment aliases used by the supplied payment form.
+apiRouter.get('/sales-documents/:id/payments', authMiddleware, docCtrl.getPayments);
+apiRouter.post('/sales-documents/:id/payments', authMiddleware, docCtrl.recordPayment);
 
 // ========================================================
 // 5. TRANSACTIONS & CLOSING (Omzet Tracking)
