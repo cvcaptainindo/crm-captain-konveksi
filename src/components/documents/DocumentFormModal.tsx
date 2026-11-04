@@ -13,6 +13,7 @@ import {
   AlertCircle,
   CheckCircle,
 } from 'lucide-react';
+import { getTodayWIBDateString } from '../../utils/dateFormatter.js';
 
 interface DocumentFormModalProps {
   isOpen: boolean;
@@ -44,11 +45,15 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const todayStr = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const todayStr = getTodayWIBDateString();
   const [docDate, setDocDate] = useState(todayStr);
   const [dueDate, setDueDate] = useState('');
   const [status, setStatus] = useState<'DRAFT' | 'SENT'>('DRAFT');
   const [notes, setNotes] = useState('');
+  const [invoiceType, setInvoiceType] = useState<string>('INVOICE STANDARD');
+  const [customInvoiceType, setCustomInvoiceType] = useState<string>('');
+  const [parentInvoiceId, setParentInvoiceId] = useState<number | string>('');
+  const [customerInvoices, setCustomerInvoices] = useState<SalesDocument[]>([]);
   const [terms, setTerms] = useState(
     docType === 'QUOTATION'
       ? '1. Harga berlaku selama 14 hari sejak tanggal penawaran diterbitkan.\n2. Pembayaran DP 50% saat PO disetujui, pelunasan 50% sebelum barang dikirim.\n3. Waktu pengerjaan dihitung setelah approval sample & DP diterima.'
@@ -64,6 +69,20 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    if (isOpen && docType === 'INVOICE' && customer.id) {
+      // Load customer invoices for parent reference (DP -> Pelunasan linking)
+      apiRequest(`/sales-documents/customer/${customer.id}`)
+        .then(res => {
+          if (res.success && Array.isArray(res.data)) {
+            const invoices = res.data.filter((d: SalesDocument) => d.doc_type === 'INVOICE' && (!editingDoc || d.id !== editingDoc.id));
+            setCustomerInvoices(invoices);
+          }
+        })
+        .catch(() => setCustomerInvoices([]));
+    }
+  }, [isOpen, docType, customer.id, editingDoc]);
+
+  useEffect(() => {
     if (isOpen) {
       if (editingDoc) {
         setDocDate(editingDoc.doc_date);
@@ -74,6 +93,8 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
         setDiscount(editingDoc.discount || 0);
         setTax(editingDoc.tax || 0);
         setDocNumberPreview(editingDoc.doc_number);
+        setInvoiceType(editingDoc.invoice_type || 'INVOICE STANDARD');
+        setParentInvoiceId(editingDoc.parent_invoice_id || '');
         if (editingDoc.items && editingDoc.items.length > 0) {
           setItems(
             editingDoc.items.map(it => ({
@@ -92,6 +113,9 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
         setNotes('');
         setDiscount(0);
         setTax(0);
+        setInvoiceType('INVOICE STANDARD');
+        setCustomInvoiceType('');
+        setParentInvoiceId('');
         setItems([{ product_name: '', quantity: 1, unit: 'Pcs', unit_price: 0, notes: '' }]);
         fetchDocNumberPreview(docType);
       }
@@ -185,8 +209,14 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
 
     setIsSubmitting(true);
     try {
+      const resolvedType = docType === 'INVOICE'
+        ? (invoiceType === 'CUSTOM' ? (customInvoiceType.trim() || 'INVOICE CUSTOM') : invoiceType)
+        : undefined;
+
       const payload = {
         doc_type: docType,
+        invoice_type: resolvedType,
+        parent_invoice_id: (docType === 'INVOICE' && parentInvoiceId) ? Number(parentInvoiceId) : null,
         customer_id: customer.id,
         doc_date: docDate,
         due_date: dueDate || null,
@@ -327,6 +357,78 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
             </div>
           </div>
 
+          {/* Keterangan / Tipe Invoice Khusus Dokumen Invoice */}
+          {docType === 'INVOICE' && (
+            <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-blue-950 uppercase tracking-wide">
+                    Keterangan / Tipe Invoice <span className="text-red-500">*</span>
+                  </label>
+                  <p className="text-[11px] text-blue-700">
+                    Pilih tipe tagihan untuk customer (DP, Pelunasan, Cicilan, atau Custom)
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { val: 'INVOICE STANDARD', label: 'Standard' },
+                    { val: 'INVOICE DP', label: 'DP / Uang Muka' },
+                    { val: 'INVOICE TERMIN / CICILAN', label: 'Termin / Cicilan' },
+                    { val: 'INVOICE PELUNASAN', label: 'Pelunasan' },
+                    { val: 'CUSTOM', label: 'Lainnya...' },
+                  ].map(opt => (
+                    <button
+                      key={opt.val}
+                      type="button"
+                      onClick={() => setInvoiceType(opt.val)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                        invoiceType === opt.val
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-white text-blue-900 border border-blue-200 hover:bg-blue-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {invoiceType === 'CUSTOM' && (
+                <div>
+                  <input
+                    type="text"
+                    value={customInvoiceType}
+                    onChange={e => setCustomInvoiceType(e.target.value)}
+                    placeholder="Contoh: INVOICE SAMPLE PRODUKSI / INVOICE TAMBAHAN JASA BORDIR"
+                    className="w-full text-xs px-3 py-2 bg-white border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-semibold text-blue-900"
+                  />
+                </div>
+              )}
+
+              {/* Linking to Parent Invoice (DP <-> Pelunasan) */}
+              {customerInvoices.length > 0 && (
+                <div className="pt-2 border-t border-blue-200/80 flex flex-col sm:flex-row sm:items-center gap-2">
+                  <label className="text-[11px] font-semibold text-blue-900 whitespace-nowrap">
+                    Relasi Dokumen Terkait:
+                  </label>
+                  <select
+                    value={parentInvoiceId}
+                    onChange={e => setParentInvoiceId(e.target.value)}
+                    className="flex-1 text-xs px-2.5 py-1.5 bg-white border border-blue-300 rounded-lg text-blue-950 font-medium"
+                  >
+                    <option value="">-- Tidak Terhubung ke Invoice Lain --</option>
+                    {customerInvoices.map(inv => (
+                      <option key={inv.id} value={inv.id}>
+                        {inv.doc_number} ({inv.invoice_type || 'INVOICE'}) — Total: Rp {Number(inv.total_amount).toLocaleString('id-ID')} [{inv.status}]
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Detail Produk Multi Item */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -344,16 +446,128 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
               </button>
             </div>
 
-            {/* Table of items */}
-            <div className="overflow-x-auto border border-neutral-200 rounded-xl">
-              <table className="w-full text-left text-xs">
+            {/* Responsive Items Container: Mobile Card Layout (< sm) and Desktop Table (>= sm) */}
+
+
+            {/* Mobile View (< sm): Card-based per-item layout for effortless tapping & clear visibility on 360px-430px screens */}
+            <div className="block sm:hidden space-y-3">
+              {items.map((item, idx) => {
+                const rowQty = Number(item.quantity) || 0;
+                const rowPrice = Number(item.unit_price) || 0;
+                const rowSubtotal = rowQty * rowPrice;
+
+                return (
+                  <div
+                    key={idx}
+                    className="p-3 bg-neutral-50/90 border border-neutral-200 rounded-xl space-y-2.5 shadow-2xs"
+                  >
+                    <div className="flex items-center justify-between gap-2 border-b border-neutral-200/80 pb-2">
+                      <span className="font-mono text-xs font-bold text-neutral-500">
+                        Item #{idx + 1}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-neutral-900">
+                          Rp {rowSubtotal.toLocaleString('id-ID')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItem(idx)}
+                          disabled={items.length <= 1}
+                          className={`p-1.5 rounded-lg text-neutral-400 transition-colors ${
+                            items.length <= 1
+                              ? 'opacity-30 cursor-not-allowed'
+                              : 'hover:text-rose-600 hover:bg-rose-50 text-rose-500'
+                          }`}
+                          title="Hapus baris produk"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Nama Produk */}
+                    <div>
+                      <label className="block text-[10px] font-semibold text-neutral-600 uppercase mb-1">
+                        Nama Produk / Spesifikasi <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Contoh: Kemeja PDL Drill, Kaos Polo..."
+                        value={item.product_name}
+                        onChange={e => handleItemChange(idx, 'product_name', e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-neutral-300 rounded-lg text-xs focus:outline-hidden focus:border-[#c5a059]"
+                      />
+                    </div>
+
+                    {/* QTY & SATUAN (Highlighted & prominently visible on mobile) */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-neutral-800 uppercase mb-1 flex items-center justify-between">
+                          <span>Kuantitas (Qty)</span>
+                          <span className="text-amber-600">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="any"
+                          required
+                          value={item.quantity}
+                          onChange={e => handleItemChange(idx, 'quantity', e.target.value)}
+                          className="w-full px-3 py-2 bg-amber-50/40 border border-amber-300/80 font-bold text-sm font-mono text-neutral-950 rounded-lg text-center focus:outline-hidden focus:border-[#c5a059] focus:bg-white"
+                          placeholder="1"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-neutral-600 uppercase mb-1">
+                          Satuan
+                        </label>
+                        <input
+                          type="text"
+                          list={`units-list-mobile-${idx}`}
+                          value={item.unit}
+                          onChange={e => handleItemChange(idx, 'unit', e.target.value)}
+                          placeholder="Pcs"
+                          className="w-full px-3 py-2 bg-white border border-neutral-300 rounded-lg text-xs text-center focus:outline-hidden focus:border-[#c5a059]"
+                        />
+                        <datalist id={`units-list-mobile-${idx}`}>
+                          {COMMON_UNITS.map(u => (
+                            <option key={u} value={u} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
+
+                    {/* Harga Satuan */}
+                    <div>
+                      <label className="block text-[10px] font-semibold text-neutral-600 uppercase mb-1">
+                        Harga Satuan (Rp) <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="100"
+                        required
+                        value={item.unit_price}
+                        onChange={e => handleItemChange(idx, 'unit_price', e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-neutral-300 rounded-lg text-xs font-mono text-right focus:outline-hidden focus:border-[#c5a059]"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table View (>= sm): Compact full table */}
+            <div className="hidden sm:block overflow-x-auto border border-neutral-200 rounded-xl">
+              <table className="w-full text-left text-xs min-w-[640px]">
                 <thead className="text-[11px] text-neutral-500 uppercase bg-neutral-50/80 border-b border-neutral-200">
                   <tr>
                     <th className="py-2.5 px-3 w-8 text-center">#</th>
                     <th className="py-2.5 px-3 min-w-[200px]">Nama Produk / Spesifikasi</th>
-                    <th className="py-2.5 px-3 w-24">Qty</th>
-                    <th className="py-2.5 px-3 w-28">Satuan</th>
-                    <th className="py-2.5 px-3 w-36">Harga Satuan (Rp)</th>
+                    <th className="py-2.5 px-3 w-28 text-center">Qty</th>
+                    <th className="py-2.5 px-3 w-28 text-center">Satuan</th>
+                    <th className="py-2.5 px-3 w-36 text-right">Harga Satuan (Rp)</th>
                     <th className="py-2.5 px-3 w-36 text-right">Subtotal (Rp)</th>
                     <th className="py-2.5 px-2 w-10 text-center">Aksi</th>
                   </tr>
@@ -502,14 +716,24 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
 
             <div>
               <label className="block text-[11px] font-medium text-neutral-700 mb-1">
-                Syarat & Ketentuan Pembayaran:
+                Syarat & Ketentuan:
               </label>
-              <textarea
-                rows={3}
-                value={terms}
-                onChange={e => setTerms(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-neutral-300 rounded-xl text-xs focus:outline-hidden focus:ring-1 focus:ring-[#c5a059]"
-              />
+              {docType === 'INVOICE' ? (
+                <div className="p-2.5 bg-neutral-100 border border-neutral-200 rounded-xl text-neutral-600 text-[11px] leading-relaxed">
+                  <div className="font-semibold text-neutral-800 mb-0.5 flex items-center gap-1">
+                    <span>Otomatis dari Pengaturan Admin</span>
+                  </div>
+                  Syarat & ketentuan Invoice dikelola terpusat oleh Admin dan akan dicantumkan secara otomatis ke dalam dokumen PDF Invoice ini.
+                </div>
+              ) : (
+                <textarea
+                  rows={3}
+                  value={terms}
+                  onChange={e => setTerms(e.target.value)}
+                  placeholder="1. Masa berlaku penawaran..."
+                  className="w-full px-3 py-2 bg-white border border-neutral-300 rounded-xl text-xs focus:outline-hidden focus:ring-1 focus:ring-[#c5a059]"
+                />
+              )}
             </div>
           </div>
         </form>

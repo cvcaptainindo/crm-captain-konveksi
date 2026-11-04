@@ -12,6 +12,7 @@ import {
   X,
   DollarSign,
   UserCheck,
+  Tv,
   Radio,
   MessageSquare,
   FileText,
@@ -26,7 +27,9 @@ export type NavTab =
   | 'wa_workspace'
   | 'connect_wa'
   | 'wa_monitoring'
+  | 'screen_monitoring'
   | 'sales_mgmt'
+  | 'invoice_settings'
   | 'rules'
   | 'audit'
   | 'trash';
@@ -57,10 +60,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'transactions' as NavTab, label: 'Transaksi & Omzet', icon: DollarSign, adminOnly: false },
     { id: 'schedule' as NavTab, label: 'Agenda Follow-Up', icon: CalendarClock, adminOnly: false },
     { id: 'templates' as NavTab, label: 'WhatsApp Templates', icon: MessageSquareText, adminOnly: false },
-    { id: 'wa_workspace' as NavTab, label: 'WhatsApp Web', icon: MessageSquare, adminOnly: false, salesOnly: true },
-
+    { id: 'wa_workspace' as NavTab, label: 'WhatsApp Web', icon: MessageSquare, adminOnly: false },
+    { id: 'connect_wa' as NavTab, label: 'Live Screen WA', icon: Radio, adminOnly: false, salesOnly: true },
     { id: 'wa_monitoring' as NavTab, label: 'Monitoring Follow-Up WA', icon: FileText, adminOnly: true },
+    { id: 'screen_monitoring' as NavTab, label: 'Live Monitor WA', icon: Tv, adminOnly: true },
     { id: 'sales_mgmt' as NavTab, label: 'Kelola Akun Sales', icon: UserCheck, adminOnly: true },
+    { id: 'invoice_settings' as NavTab, label: 'Pengaturan Invoice', icon: FileText, adminOnly: true },
     { id: 'rules' as NavTab, label: 'Aturan Follow-Up', icon: Sliders, adminOnly: true },
     { id: 'audit' as NavTab, label: 'Audit Log Forensik', icon: History, adminOnly: true },
     { id: 'trash' as NavTab, label: 'Trash / Sampah', icon: Trash2, adminOnly: true },
@@ -71,13 +76,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Mobile backdrop */}
       {isOpenMobile && (
         <div
-          className="fixed inset-0 bg-neutral-950/70 z-50 md:hidden backdrop-blur-xs transition-opacity duration-200"
+          className="fixed inset-0 bg-neutral-950/70 z-50 md:hidden backdrop-blur-xs transition-opacity duration-200 print:hidden"
           onClick={onCloseMobile}
         />
       )}
 
       <aside
-        className={`fixed md:sticky top-0 left-0 z-50 h-screen w-72 md:w-64 bg-neutral-900 text-neutral-300 flex flex-col transition-transform duration-200 ease-in-out md:translate-x-0 ${
+        className={`fixed md:sticky top-0 left-0 z-50 h-screen w-72 md:w-64 bg-neutral-900 text-neutral-300 flex flex-col transition-transform duration-200 ease-in-out md:translate-x-0 print:hidden ${
           isOpenMobile ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
         }`}
       >
