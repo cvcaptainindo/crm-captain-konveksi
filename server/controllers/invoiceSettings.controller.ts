@@ -79,6 +79,60 @@ export async function getInvoiceSettings(req: AuthenticatedRequest, res: Respons
 }
 
 /**
+ * GET /api/invoice-settings
+ * Read-only invoice display settings for authenticated Sales/Admin users.
+ * This endpoint intentionally does not create or mutate the settings row.
+ */
+export async function getSalesInvoiceSettings(req: AuthenticatedRequest, res: Response): Promise<void> {
+  if (!['SALES', 'ADMIN'].includes(String(req.user?.role || ''))) {
+    res.status(403).json({ success: false, message: 'Akses ditolak.' });
+    return;
+  }
+
+  try {
+    const [settingsRows] = await pool.query<any[]>(
+      'SELECT * FROM invoice_settings WHERE id = 1 LIMIT 1'
+    );
+    const settings = settingsRows?.[0] || {};
+    const [terms] = await pool.query<any[]>(
+      'SELECT id, term_text, sort_order, is_active FROM invoice_terms WHERE is_active = TRUE ORDER BY sort_order ASC, id ASC'
+    );
+
+    res.json({
+      success: true,
+      data: {
+        id: Number(settings.id) || 1,
+        company_name: settings.company_name || '',
+        company_legal_name: settings.company_legal_name || settings.legal_name || null,
+        company_logo_url: settings.company_logo_url || null,
+        company_address: settings.company_address || null,
+        company_whatsapp: settings.company_whatsapp || null,
+        company_phone: settings.company_phone || settings.company_whatsapp || null,
+        company_email: settings.company_email || null,
+        company_website: settings.company_website || null,
+        nib: settings.nib || null,
+        npwp: settings.npwp || null,
+        bank_name: settings.bank_name || null,
+        bank_account_number: settings.bank_account_number || null,
+        bank_account_holder: settings.bank_account_holder || null,
+        signatory_name: settings.signatory_name || null,
+        signatory_role: settings.signatory_role || settings.signatory_title || null,
+        signatory_signature_url: settings.signatory_signature_url || settings.signature_image_url || null,
+        company_stamp_url: settings.company_stamp_url || settings.stamp_image_url || null,
+        legal_name: settings.company_legal_name || settings.legal_name || null,
+        signatory_title: settings.signatory_role || settings.signatory_title || null,
+        signature_image_url: settings.signatory_signature_url || settings.signature_image_url || null,
+        stamp_image_url: settings.company_stamp_url || settings.stamp_image_url || null,
+        terms: terms || [],
+      },
+    });
+  } catch (err: any) {
+    console.error('[getSalesInvoiceSettings error]', err);
+    res.status(500).json({ success: false, message: 'Gagal memuat pengaturan invoice.' });
+  }
+}
+
+/**
  * PUT /api/admin/invoice-settings
  * Admin only: Update company details, bank account, and signatory info
  */

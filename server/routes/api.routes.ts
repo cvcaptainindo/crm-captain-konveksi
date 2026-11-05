@@ -62,12 +62,14 @@ apiRouter.delete('/customers/:id', authMiddleware, requireAdmin, custCtrl.softDe
 // ========================================================
 apiRouter.get('/documents/preview-number', authMiddleware, docCtrl.previewNextNumber);
 apiRouter.get('/documents/customer/:customerId', authMiddleware, docCtrl.getDocumentsByCustomer);
+apiRouter.get('/sales-documents/customer/:customerId', authMiddleware, docCtrl.getDocumentsByCustomer);
 apiRouter.get('/customers/:id/sales-documents', authMiddleware, docCtrl.getDocumentsByCustomer);
 apiRouter.get('/documents/:id/payments', authMiddleware, docCtrl.getPayments);
 apiRouter.post('/documents/:id/payments', authMiddleware, docCtrl.recordPayment);
 apiRouter.get('/documents/:id/refunds', authMiddleware, docCtrl.getDocumentRefunds);
 apiRouter.post('/documents/:id/refunds', authMiddleware, docCtrl.createDocumentRefund);
 apiRouter.patch('/documents/:id/refunds/:refundId', authMiddleware, docCtrl.completeDocumentRefund);
+apiRouter.patch('/documents/:id/keterangan', authMiddleware, docCtrl.updateInvoiceKeterangan);
 apiRouter.post('/documents/:id/close', authMiddleware, docCtrl.closeInvoice);
 apiRouter.post('/documents/:id/cancel', authMiddleware, docCtrl.cancelInvoice);
 apiRouter.get('/documents', authMiddleware, docCtrl.getDocuments);
@@ -122,6 +124,7 @@ apiRouter.get('/audit-logs', authMiddleware, requireAdmin, auditCtrl.getAuditLog
 // ========================================================
 // INVOICE SETTINGS & PAYMENT TERMS (Admin Only)
 // ========================================================
+apiRouter.get('/invoice-settings', authMiddleware, invSetCtrl.getSalesInvoiceSettings);
 apiRouter.get('/admin/invoice-settings', authMiddleware, requireAdmin, invSetCtrl.getInvoiceSettings);
 apiRouter.put('/admin/invoice-settings', authMiddleware, requireAdmin, invSetCtrl.updateInvoiceSettings);
 apiRouter.post('/admin/invoice-settings/terms', authMiddleware, requireAdmin, invSetCtrl.addInvoiceTerm);

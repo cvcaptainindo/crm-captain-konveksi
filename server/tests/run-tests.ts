@@ -20,7 +20,11 @@ import * as XLSX from 'xlsx';
 import { parseTemplate, sanitizeWhatsAppPhone, buildWhatsAppLink } from '../services/templateParser.js';
 import { generateCustomerExport, generateActivityExport, generateTransactionExport, sanitizeSpreadsheetCell } from '../services/exportService.js';
 import { isValidCalendarDate } from '../controllers/transaction.controller.js';
-import { calculateDocumentTotals } from '../controllers/document.controller.js';
+import {
+  calculateDocumentTotals,
+  normalizeInvoiceMetadata,
+  validateInvoiceParentRelation,
+} from '../controllers/document.controller.js';
 import { validateTemplateForPreview } from '../controllers/template.controller.js';
 import { requireAdmin } from '../middlewares/rbac.middleware.js';
 
@@ -67,6 +71,44 @@ async function runTestSuite() {
   await runTest('Invoice totals reject negative quantity and price values', () => {
     assert.throws(() => calculateDocumentTotals([{ quantity: -1, unit_price: 100 }]), /tidak boleh bernilai negatif/i);
     assert.throws(() => calculateDocumentTotals([{ quantity: 1, unit_price: -1 }]), /tidak boleh bernilai negatif/i);
+  });
+
+  await runTest('Invoice metadata normalizes defaults, trims labels, and validates parent IDs', () => {
+    assert.deepStrictEqual(normalizeInvoiceMetadata(undefined, undefined), {
+      invoice_type: 'INVOICE STANDARD', parent_invoice_id: null,
+    });
+    assert.deepStrictEqual(normalizeInvoiceMetadata('  INVOICE DP  ', '12'), {
+      invoice_type: 'INVOICE DP', parent_invoice_id: 12,
+    });
+    assert.throws(() => normalizeInvoiceMetadata('x'.repeat(151), null), /maksimal 150 karakter/i);
+    assert.throws(() => normalizeInvoiceMetadata({ label: 'INVOICE DP' }, null), /harus berupa teks/i);
+    assert.throws(() => normalizeInvoiceMetadata('INVOICE DP', true), /relasi invoice terkait tidak valid/i);
+    assert.throws(() => normalizeInvoiceMetadata('INVOICE DP', '1.5'), /relasi invoice terkait tidak valid/i);
+    assert.throws(() => normalizeInvoiceMetadata('INVOICE DP', '-2'), /relasi invoice terkait tidak valid/i);
+  });
+
+  await runTest('Invoice parent relation rejects missing, non-invoice, cross-customer, and self references', () => {
+    assert.throws(() => validateInvoiceParentRelation(undefined, 10), /tidak ditemukan/i);
+    assert.throws(() => validateInvoiceParentRelation({ id: 2, customer_id: 10, doc_type: 'QUOTATION' }, 10), /hanya boleh mengarah/i);
+    assert.throws(() => validateInvoiceParentRelation({ id: 2, customer_id: 11, doc_type: 'INVOICE' }, 10), /customer yang sama/i);
+    assert.throws(() => validateInvoiceParentRelation({ id: 2, customer_id: 10, doc_type: 'INVOICE' }, 10, 2), /dirinya sendiri/i);
+    assert.doesNotThrow(() => validateInvoiceParentRelation({ id: 3, customer_id: 10, doc_type: 'INVOICE' }, 10, 2));
+  });
+
+  await runTest('PR-02 routes expose authenticated Sales invoice settings and metadata update endpoints', () => {
+    const routes = fs.readFileSync(path.resolve(process.cwd(), 'server/routes/api.routes.ts'), 'utf-8');
+    assert.strictEqual(routes.includes("apiRouter.get('/invoice-settings', authMiddleware, invSetCtrl.getSalesInvoiceSettings)"), true);
+    assert.strictEqual(routes.includes("apiRouter.patch('/documents/:id/keterangan', authMiddleware, docCtrl.updateInvoiceKeterangan)"), true);
+    assert.strictEqual(routes.includes("apiRouter.get('/sales-documents/customer/:customerId', authMiddleware, docCtrl.getDocumentsByCustomer)"), true);
+  });
+
+  await runTest('PR-02 SQL migration is additive and contains invoice metadata relation', () => {
+    const migration = fs.readFileSync(path.resolve(process.cwd(), 'server/database/migration_invoice_metadata.sql'), 'utf-8');
+    assert.strictEqual(migration.includes('ADD COLUMN invoice_type'), true);
+    assert.strictEqual(migration.includes('ADD COLUMN parent_invoice_id'), true);
+    assert.strictEqual(migration.includes('fk_sdoc_parent_invoice'), true);
+    assert.strictEqual(migration.includes('DELETE FROM'), false);
+    assert.strictEqual(migration.includes('UPDATE sales_documents'), false);
   });
 
   // ========================================================

@@ -33,6 +33,8 @@ interface FormItem {
 }
 
 const COMMON_UNITS = ['Meter', 'Pcs', 'Roll', 'Lusin', 'Set', 'Kg', 'Yard', 'Paket'];
+const DEFAULT_QUOTATION_TERMS =
+  '1. Harga berlaku selama 14 hari sejak tanggal penawaran diterbitkan.\n2. Pembayaran DP 50% saat PO disetujui, pelunasan 50% sebelum barang dikirim.\n3. Waktu pengerjaan dihitung setelah approval sample & DP diterima.';
 
 export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
   isOpen,
@@ -54,11 +56,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
   const [customInvoiceType, setCustomInvoiceType] = useState<string>('');
   const [parentInvoiceId, setParentInvoiceId] = useState<number | string>('');
   const [customerInvoices, setCustomerInvoices] = useState<SalesDocument[]>([]);
-  const [terms, setTerms] = useState(
-    docType === 'QUOTATION'
-      ? '1. Harga berlaku selama 14 hari sejak tanggal penawaran diterbitkan.\n2. Pembayaran DP 50% saat PO disetujui, pelunasan 50% sebelum barang dikirim.\n3. Waktu pengerjaan dihitung setelah approval sample & DP diterima.'
-      : '1. Pembayaran ditransfer ke rekening resmi CV Captain Indo / Captain Konveksi.\n2. Bukti transfer mohon dikirimkan via WhatsApp kepada Sales bersangkutan.\n3. Barang yang sudah diterima tidak dapat dikembalikan kecuali terdapat cacat produksi.'
-  );
+  const [terms, setTerms] = useState(docType === 'QUOTATION' ? DEFAULT_QUOTATION_TERMS : '');
 
   const [items, setItems] = useState<FormItem[]>([
     { product_name: '', quantity: 1, unit: 'Pcs', unit_price: 0, notes: '' },
@@ -93,7 +91,20 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
         setDiscount(editingDoc.discount || 0);
         setTax(editingDoc.tax || 0);
         setDocNumberPreview(editingDoc.doc_number);
-        setInvoiceType(editingDoc.invoice_type || 'INVOICE STANDARD');
+        const savedInvoiceType = editingDoc.invoice_type || 'INVOICE STANDARD';
+        const standardInvoiceTypes = [
+          'INVOICE STANDARD',
+          'INVOICE DP',
+          'INVOICE TERMIN / CICILAN',
+          'INVOICE PELUNASAN',
+        ];
+        if (standardInvoiceTypes.includes(savedInvoiceType)) {
+          setInvoiceType(savedInvoiceType);
+          setCustomInvoiceType('');
+        } else {
+          setInvoiceType('CUSTOM');
+          setCustomInvoiceType(savedInvoiceType);
+        }
         setParentInvoiceId(editingDoc.parent_invoice_id || '');
         if (editingDoc.items && editingDoc.items.length > 0) {
           setItems(
@@ -111,6 +122,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
         setDueDate('');
         setStatus('DRAFT');
         setNotes('');
+        setTerms(docType === 'QUOTATION' ? DEFAULT_QUOTATION_TERMS : '');
         setDiscount(0);
         setTax(0);
         setInvoiceType('INVOICE STANDARD');
@@ -121,6 +133,24 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
       }
     }
   }, [isOpen, editingDoc, docType]);
+
+
+  useEffect(() => {
+    if (!isOpen || docType !== 'INVOICE' || editingDoc) return;
+    let active = true;
+    apiRequest('/invoice-settings')
+      .then(res => {
+        if (!active) return;
+        const activeTerms = Array.isArray(res?.data?.terms)
+          ? res.data.terms.filter((term: any) => term.is_active).map((term: any) => String(term.term_text || '').trim()).filter(Boolean)
+          : [];
+        setTerms(activeTerms.join('\n'));
+      })
+      .catch(() => {
+        if (active) setTerms('');
+      });
+    return () => { active = false; };
+  }, [isOpen, docType, editingDoc]);
 
   const fetchDocNumberPreview = async (type: DocType) => {
     try {

@@ -14,6 +14,73 @@ function isValidDateOnly(value: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
+function invoiceMetadataError(message: string): Error & { statusCode: number } {
+  const error = new Error(message) as Error & { statusCode: number };
+  error.statusCode = 400;
+  return error;
+}
+
+export function normalizeInvoiceMetadata(
+  invoiceTypeValue: unknown,
+  parentInvoiceIdValue: unknown
+): { invoice_type: string; parent_invoice_id: number | null } {
+  if (invoiceTypeValue !== undefined && invoiceTypeValue !== null && typeof invoiceTypeValue !== 'string') {
+    throw invoiceMetadataError('Keterangan / tipe invoice harus berupa teks.');
+  }
+  const invoiceTypeText = typeof invoiceTypeValue === 'string' ? invoiceTypeValue : '';
+  const invoiceType = invoiceTypeText.trim() === ''
+    ? 'INVOICE STANDARD'
+    : invoiceTypeText.trim();
+  if (invoiceType.length > 150) {
+    throw invoiceMetadataError('Keterangan / tipe invoice maksimal 150 karakter.');
+  }
+
+  let parentInvoiceId: number | null = null;
+  if (parentInvoiceIdValue !== undefined && parentInvoiceIdValue !== null && parentInvoiceIdValue !== '') {
+    if (typeof parentInvoiceIdValue !== 'number' && typeof parentInvoiceIdValue !== 'string') {
+      throw invoiceMetadataError('Relasi invoice terkait tidak valid.');
+    }
+    const parsed = Number(parentInvoiceIdValue);
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+      throw invoiceMetadataError('Relasi invoice terkait tidak valid.');
+    }
+    parentInvoiceId = parsed;
+  }
+
+  return { invoice_type: invoiceType, parent_invoice_id: parentInvoiceId };
+}
+
+export function validateInvoiceParentRelation(
+  parentInvoice: { id: number | string; customer_id: number | string; doc_type: string } | null | undefined,
+  customerId: number,
+  currentInvoiceId?: number
+): void {
+  if (!parentInvoice) throw invoiceMetadataError('Invoice terkait tidak ditemukan.');
+  if (String(parentInvoice.doc_type).toUpperCase() !== 'INVOICE') {
+    throw invoiceMetadataError('Relasi hanya boleh mengarah ke dokumen Invoice.');
+  }
+  if (Number(parentInvoice.customer_id) !== Number(customerId)) {
+    throw invoiceMetadataError('Invoice terkait harus berasal dari customer yang sama.');
+  }
+  if (currentInvoiceId !== undefined && Number(parentInvoice.id) === Number(currentInvoiceId)) {
+    throw invoiceMetadataError('Invoice tidak boleh menjadi induk bagi dirinya sendiri.');
+  }
+}
+
+async function assertInvoiceParentRelation(
+  conn: any,
+  parentInvoiceId: number | null,
+  customerId: number,
+  currentInvoiceId?: number
+): Promise<void> {
+  if (parentInvoiceId === null) return;
+  const [rows] = await conn.query(
+    'SELECT id, customer_id, doc_type FROM sales_documents WHERE id = ? FOR UPDATE',
+    [parentInvoiceId]
+  );
+  validateInvoiceParentRelation(rows?.[0], customerId, currentInvoiceId);
+}
+
 /**
  * Helper to safely compute items subtotal, discounts, tax, and total amount
  */
@@ -283,10 +350,12 @@ export async function getDocumentById(req: AuthenticatedRequest, res: Response):
     const [docs] = await pool.query<any[]>(
       `SELECT d.*,
         c.name AS customer_name, c.customer_code, c.company_name, c.whatsapp_number, c.address, c.city, c.assigned_sales_id,
-        u.name AS sales_name, u.phone AS sales_phone, u.email AS sales_email
+        u.name AS sales_name, u.phone AS sales_phone, u.email AS sales_email,
+        parent_invoice.doc_number AS parent_invoice_number
        FROM sales_documents d
        JOIN customers c ON d.customer_id = c.id
        LEFT JOIN users u ON d.sales_id = u.id
+       LEFT JOIN sales_documents parent_invoice ON parent_invoice.id = d.parent_invoice_id
        WHERE d.id = ? LIMIT 1`,
       [docId]
     );
@@ -367,6 +436,8 @@ export async function createDocument(req: AuthenticatedRequest, res: Response): 
     discount = 0,
     tax = 0,
     status,
+    invoice_type,
+    parent_invoice_id,
   } = req.body;
 
   const resolvedType = (doc_type || document_type || '').toUpperCase();
@@ -455,18 +526,23 @@ export async function createDocument(req: AuthenticatedRequest, res: Response): 
       return;
     }
 
+    const invoiceMetadata = normalizeInvoiceMetadata(invoice_type, parent_invoice_id);
     const result = await withTransaction(async (conn) => {
+      await assertInvoiceParentRelation(conn, invoiceMetadata.parent_invoice_id, Number(customer.id));
+
       // Generate doc number with transaction lock
       const docNumber = await generateDocumentNumber(resolvedType as 'QUOTATION' | 'INVOICE', conn);
 
       const [docRes] = await conn.execute<any>(
         `INSERT INTO sales_documents (
-          doc_type, doc_number, customer_id, sales_id, doc_date, valid_until, due_date,
+          doc_type, invoice_type, parent_invoice_id, doc_number, customer_id, sales_id, doc_date, valid_until, due_date,
           status, subtotal, discount, tax, total_amount, paid_amount, remaining_balance, total_qty,
           notes, terms, quotation_id, transaction_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, ?, ?, ?, ?, NULL, NULL, NOW(), NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, ?, ?, ?, ?, NULL, NULL, NOW(), NOW())`,
         [
           resolvedType,
+          invoiceMetadata.invoice_type,
+          invoiceMetadata.parent_invoice_id,
           docNumber,
           customer.id,
           req.user!.id,
@@ -520,6 +596,8 @@ export async function createDocument(req: AuthenticatedRequest, res: Response): 
         doc_type: resolvedType,
         doc_number: result.docNumber,
         customer_id: customer.id,
+        invoice_type: invoiceMetadata.invoice_type,
+        parent_invoice_id: invoiceMetadata.parent_invoice_id,
         total_amount: totals.total_amount,
         items_count: sanitizedItems.length,
       },
@@ -617,7 +695,17 @@ export async function updateDocument(req: AuthenticatedRequest, res: Response): 
       items,
       discount = 0,
       tax = 0,
+      invoice_type,
+      parent_invoice_id,
     } = req.body;
+
+    const metadataProvided = invoice_type !== undefined || parent_invoice_id !== undefined;
+    const normalizedMetadata = metadataProvided
+      ? normalizeInvoiceMetadata(
+          invoice_type !== undefined ? invoice_type : doc.invoice_type,
+          parent_invoice_id !== undefined ? parent_invoice_id : doc.parent_invoice_id
+        )
+      : null;
 
     const normalizedStatus = status ? String(status).toUpperCase() : undefined;
     if (normalizedStatus && !['DRAFT', 'SENT', 'UNPAID', 'OVERDUE'].includes(normalizedStatus)) {
@@ -678,6 +766,14 @@ export async function updateDocument(req: AuthenticatedRequest, res: Response): 
       if (Number(lockedPayments[0]?.total_paid) > 0) {
         const err: any = new Error('Invoice sudah memiliki riwayat pembayaran dan tidak dapat diedit.'); err.statusCode = 409; throw err;
       }
+      if (normalizedMetadata) {
+        await assertInvoiceParentRelation(
+          conn,
+          normalizedMetadata.parent_invoice_id,
+          Number(doc.customer_id),
+          docId
+        );
+      }
 
       const updateFields: string[] = ['updated_at = NOW()'];
       const updateParams: any[] = [];
@@ -706,6 +802,10 @@ export async function updateDocument(req: AuthenticatedRequest, res: Response): 
       if (terms !== undefined) {
         updateFields.push('terms = ?');
         updateParams.push(terms ? String(terms).trim() : null);
+      }
+      if (normalizedMetadata) {
+        updateFields.push('invoice_type = ?, parent_invoice_id = ?');
+        updateParams.push(normalizedMetadata.invoice_type, normalizedMetadata.parent_invoice_id);
       }
 
       if (totals) {
@@ -750,14 +850,104 @@ export async function updateDocument(req: AuthenticatedRequest, res: Response): 
       action: `UPDATE_${doc.doc_type}`,
       entity: 'SALES_DOCUMENT',
       entityId: docId,
-      oldData: { status: doc.status, total: doc.total_amount },
-      newData: { status: status || doc.status, total: totals ? totals.total_amount : doc.total_amount },
+      oldData: {
+        status: doc.status,
+        total: doc.total_amount,
+        invoice_type: doc.invoice_type,
+        parent_invoice_id: doc.parent_invoice_id,
+      },
+      newData: {
+        status: status || doc.status,
+        total: totals ? totals.total_amount : doc.total_amount,
+        invoice_type: normalizedMetadata?.invoice_type ?? doc.invoice_type,
+        parent_invoice_id: normalizedMetadata ? normalizedMetadata.parent_invoice_id : (doc.parent_invoice_id ?? null),
+      },
     });
 
     res.json({ success: true, message: 'Dokumen berhasil diperbarui.' });
   } catch (err: any) {
     console.error('[updateDocument error]', err);
     res.status(400).json({ success: false, message: err.message || 'Gagal memperbarui dokumen.' });
+  }
+}
+
+
+/**
+ * PATCH /api/documents/:id/keterangan
+ * Update invoice type and parent invoice relation without changing financial data.
+ */
+export async function updateInvoiceKeterangan(req: AuthenticatedRequest, res: Response): Promise<void> {
+  const docId = Number(req.params.id);
+  if (!Number.isSafeInteger(docId) || docId <= 0) {
+    res.status(400).json({ success: false, message: 'ID Invoice tidak valid.' });
+    return;
+  }
+  if (req.user?.role !== 'SALES') {
+    res.status(403).json({ success: false, message: 'Hanya Sales yang dapat mengubah keterangan invoice.' });
+    return;
+  }
+
+  const { invoice_type, parent_invoice_id } = req.body || {};
+  if (invoice_type === undefined && parent_invoice_id === undefined) {
+    res.status(400).json({ success: false, message: 'Tidak ada metadata invoice yang dikirim.' });
+    return;
+  }
+
+  try {
+    const result = await withTransaction(async (conn) => {
+      const [docs] = await conn.query<any[]>(
+        `SELECT d.*, c.assigned_sales_id
+         FROM sales_documents d
+         JOIN customers c ON c.id = d.customer_id
+         WHERE d.id = ? FOR UPDATE`,
+        [docId]
+      );
+      if (!docs.length) {
+        const error: any = new Error('Invoice tidak ditemukan.'); error.statusCode = 404; throw error;
+      }
+      const doc = docs[0];
+      if (doc.doc_type !== 'INVOICE') {
+        const error: any = new Error('Keterangan hanya dapat diubah pada dokumen Invoice.'); error.statusCode = 400; throw error;
+      }
+      if (Number(doc.assigned_sales_id) !== Number(req.user?.id)) {
+        const error: any = new Error('Akses ditolak: Invoice bukan milik customer Anda.'); error.statusCode = 403; throw error;
+      }
+      if (['CLOSING', 'CANCEL', 'CANCELLED', 'PAID'].includes(String(doc.status))) {
+        const error: any = new Error('Invoice lunas, closing, atau dibatalkan tidak dapat diubah.'); error.statusCode = 409; throw error;
+      }
+      const [paymentRows] = await conn.query<any[]>(
+        'SELECT COALESCE(SUM(amount), 0) AS total_paid FROM sales_document_payments WHERE document_id = ? FOR UPDATE',
+        [docId]
+      );
+      if (Number(paymentRows[0]?.total_paid) > 0) {
+        const error: any = new Error('Invoice yang sudah memiliki riwayat pembayaran tidak dapat diubah.'); error.statusCode = 409; throw error;
+      }
+
+      const metadata = normalizeInvoiceMetadata(
+        invoice_type !== undefined ? invoice_type : doc.invoice_type,
+        parent_invoice_id !== undefined ? parent_invoice_id : doc.parent_invoice_id
+      );
+      await assertInvoiceParentRelation(conn, metadata.parent_invoice_id, Number(doc.customer_id), docId);
+      await conn.execute(
+        'UPDATE sales_documents SET invoice_type = ?, parent_invoice_id = ?, updated_at = NOW() WHERE id = ?',
+        [metadata.invoice_type, metadata.parent_invoice_id, docId]
+      );
+      return { doc, metadata };
+    });
+
+    await logAudit({
+      userId: req.user?.id,
+      userName: req.user?.name,
+      action: 'UPDATE_INVOICE_KETERANGAN',
+      entity: 'SALES_DOCUMENT',
+      entityId: docId,
+      oldData: { invoice_type: result.doc.invoice_type, parent_invoice_id: result.doc.parent_invoice_id },
+      newData: result.metadata,
+    });
+    res.json({ success: true, message: 'Keterangan invoice berhasil diperbarui.', data: result.metadata });
+  } catch (err: any) {
+    const statusCode = err.statusCode || 500;
+    res.status(statusCode).json({ success: false, message: err.message || 'Gagal memperbarui keterangan invoice.' });
   }
 }
 

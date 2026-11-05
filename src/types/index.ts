@@ -239,6 +239,9 @@ export interface SalesDocumentRefund {
 export interface SalesDocument {
   id: number;
   doc_type: DocType;
+  invoice_type?: string | null;
+  parent_invoice_id?: number | null;
+  parent_invoice_number?: string | null;
   doc_number: string;
   customer_id: number;
   sales_id: number;
