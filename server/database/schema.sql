@@ -161,6 +161,8 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE TABLE IF NOT EXISTS sales_documents (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   doc_type ENUM('QUOTATION', 'INVOICE') NOT NULL,
+  invoice_type VARCHAR(150) NOT NULL DEFAULT 'INVOICE STANDARD',
+  parent_invoice_id INT UNSIGNED NULL,
   doc_number VARCHAR(60) NOT NULL UNIQUE,
   customer_id INT UNSIGNED NOT NULL,
   sales_id INT UNSIGNED NOT NULL,
@@ -184,12 +186,14 @@ CREATE TABLE IF NOT EXISTS sales_documents (
   CONSTRAINT fk_sdoc_cust FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE RESTRICT,
   CONSTRAINT fk_sdoc_sales FOREIGN KEY (sales_id) REFERENCES users(id) ON DELETE RESTRICT,
   CONSTRAINT fk_sdoc_quotation FOREIGN KEY (quotation_id) REFERENCES sales_documents(id) ON DELETE SET NULL,
+  CONSTRAINT fk_sdoc_parent_invoice FOREIGN KEY (parent_invoice_id) REFERENCES sales_documents(id) ON DELETE RESTRICT,
   CONSTRAINT fk_sdoc_trx FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE SET NULL,
   INDEX idx_sdoc_cust (customer_id),
   INDEX idx_sdoc_sales (sales_id),
   INDEX idx_sdoc_type (doc_type),
   INDEX idx_sdoc_status (status),
   INDEX idx_sdoc_date (doc_date),
+  INDEX idx_sdoc_parent_invoice (parent_invoice_id),
   INDEX idx_sdoc_trx (transaction_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

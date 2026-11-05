@@ -1,19 +1,8 @@
-import React from 'react';
-import { SalesDocument } from '../../types/index.js';
+import React, { useEffect, useState } from 'react';
+import { InvoiceSettings, SalesDocument } from '../../types/index.js';
 import { useToast } from '../../contexts/ToastContext.js';
-import {
-  X,
-  Printer,
-  Copy,
-  CheckCircle,
-  FileText,
-  Calendar,
-  Building,
-  User,
-  Phone,
-  Mail,
-  Share2,
-} from 'lucide-react';
+import { apiRequest } from '../../api/client.js';
+import { X, Printer, Copy } from 'lucide-react';
 
 interface DocumentViewModalProps {
   isOpen: boolean;
@@ -27,10 +16,30 @@ export const DocumentViewModal: React.FC<DocumentViewModalProps> = ({
   onClose,
 }) => {
   const { showToast } = useToast();
+  const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !document) {
+      setInvoiceSettings(null);
+      return;
+    }
+    let active = true;
+    apiRequest('/invoice-settings')
+      .then(res => {
+        if (active) setInvoiceSettings(res?.success && res.data ? res.data as InvoiceSettings : null);
+      })
+      .catch(() => {
+        if (active) setInvoiceSettings(null);
+      });
+    return () => { active = false; };
+  }, [isOpen, document?.id]);
 
   if (!isOpen || !document) return null;
 
   const isQuotation = document.doc_type === 'QUOTATION';
+  const companyName = invoiceSettings?.company_name?.trim() || 'CAPTAIN KONVEKSI';
+  const companyLegalName = invoiceSettings?.company_legal_name || invoiceSettings?.legal_name || '';
+  const printTerms = document.terms?.trim() || '';
 
   const handlePrint = () => {
     window.print();
@@ -46,7 +55,7 @@ export const DocumentViewModal: React.FC<DocumentViewModalProps> = ({
       )
       .join('\n');
 
-    const message = `*${isQuotation ? 'PENAWARAN HARGA' : 'INVOICE TAGIHAN'} - CAPTAIN KONVEKSI*
+    const message = `*${isQuotation ? 'PENAWARAN HARGA' : 'INVOICE TAGIHAN'} - ${companyName}*
 No. Dokumen: *${document.doc_number}*
 Tanggal: ${document.doc_date}
 Kepada: ${document.customer_name}${document.company_name ? ` (${document.company_name})` : ''}
@@ -59,7 +68,7 @@ ${document.discount > 0 ? `Diskon: Rp ${Number(document.discount).toLocaleString
     }*TOTAL KESELURUHAN: Rp ${Number(document.total_amount).toLocaleString('id-ID')}*
 
 ${document.notes ? `Catatan: ${document.notes}\n` : ''}
-Terima kasih telah mempercayakan produksi konveksi kepada Captain Konveksi.
+Terima kasih telah mempercayakan produksi konveksi kepada ${companyName}.
 Sales PIC: ${document.sales_name || 'Tim Sales'}`;
 
     navigator.clipboard.writeText(message);
@@ -124,20 +133,25 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b-2 border-neutral-900">
               <div className="flex items-center gap-3.5">
                 <img
-                  src="/logo.jpg"
-                  alt="Captain Konveksi"
-                  className="w-14 h-14 rounded-xl object-cover border border-[#c5a059]/40 shadow-xs shrink-0"
+                  src={invoiceSettings?.company_logo_url || '/logo.jpg'}
+                  alt={companyName}
+                  className="w-14 h-14 rounded-xl object-contain border border-[#c5a059]/40 shadow-xs shrink-0"
                 />
-                <div>
+                <div className="space-y-0.5">
                   <h1 className="text-xl sm:text-2xl font-black text-neutral-950 tracking-tight leading-tight">
-                    CAPTAIN KONVEKSI
+                    {companyName}
                   </h1>
-                  <div className="text-xs font-bold text-[#c5a059] uppercase tracking-wider font-mono">
-                    CV CAPTAIN INDO
-                  </div>
-                  <p className="text-[11px] text-neutral-500 mt-0.5 leading-tight">
-                    Produsen Konveksi Kemeja, Kaos, Polo, Jaket & Seragam Instansi
-                  </p>
+                  {companyLegalName && (
+                    <div className="text-xs font-bold text-[#c5a059] uppercase tracking-wider font-mono">
+                      {companyLegalName}
+                    </div>
+                  )}
+                  {invoiceSettings?.company_address && <p className="text-[10px] text-neutral-600 whitespace-pre-line">{invoiceSettings.company_address}</p>}
+                  {(invoiceSettings?.company_phone || invoiceSettings?.company_whatsapp) && <p className="text-[10px] text-neutral-600">Telp/WA: {invoiceSettings.company_phone || invoiceSettings.company_whatsapp}</p>}
+                  {invoiceSettings?.company_email && <p className="text-[10px] text-neutral-600">Email: {invoiceSettings.company_email}</p>}
+                  {invoiceSettings?.company_website && <p className="text-[10px] text-neutral-600">{invoiceSettings.company_website}</p>}
+                  {invoiceSettings?.nib && <p className="text-[10px] text-neutral-600">NIB: {invoiceSettings.nib}</p>}
+                  {invoiceSettings?.npwp && <p className="text-[10px] text-neutral-600">NPWP: {invoiceSettings.npwp}</p>}
                 </div>
               </div>
 
@@ -148,6 +162,12 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
                 <div className="font-mono text-xs font-bold text-neutral-700 mt-1">
                   NO: <span className="text-[#c5a059]">{document.doc_number}</span>
                 </div>
+                {!isQuotation && document.invoice_type && (
+                  <div className="text-[10px] font-bold text-[#a07832] uppercase mt-1">{document.invoice_type}</div>
+                )}
+                {!isQuotation && document.parent_invoice_number && (
+                  <div className="text-[10px] text-neutral-500 font-mono mt-1">Referensi: {document.parent_invoice_number}</div>
+                )}
                 <div className="mt-1">
                   <span
                     className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full border ${
@@ -266,29 +286,25 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
                   </div>
                 )}
 
-                {document.terms && (
+                {printTerms && (
                   <div>
                     <span className="font-bold text-neutral-800 block text-[11px] mb-1">
                       Syarat & Ketentuan:
                     </span>
                     <p className="text-neutral-600 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200/80 leading-relaxed text-[10px] whitespace-pre-wrap">
-                      {document.terms}
+                      {printTerms}
                     </p>
                   </div>
                 )}
 
-                {/* Bank Account Details for Invoices */}
-                {!isQuotation && (
+                {!isQuotation && (invoiceSettings?.bank_name || invoiceSettings?.bank_account_number || invoiceSettings?.bank_account_holder) && (
                   <div className="bg-neutral-50 p-3 rounded-lg border border-neutral-200 text-[11px] space-y-1">
                     <span className="font-bold text-neutral-900 block font-mono text-[10px] uppercase tracking-wider text-[#c5a059]">
                       Rekening Pembayaran Resmi:
                     </span>
-                    <div className="text-neutral-700">
-                      <strong>Bank Mandiri:</strong> 137-00-1892831-2 a.n. <strong>CV CAPTAIN INDO</strong>
-                    </div>
-                    <div className="text-neutral-700">
-                      <strong>Bank BCA:</strong> 018-3829102 a.n. <strong>CV CAPTAIN INDO</strong>
-                    </div>
+                    {invoiceSettings?.bank_name && <div className="text-neutral-700"><strong>Bank:</strong> {invoiceSettings.bank_name}</div>}
+                    {invoiceSettings?.bank_account_number && <div className="text-neutral-700"><strong>No. Rekening:</strong> {invoiceSettings.bank_account_number}</div>}
+                    {invoiceSettings?.bank_account_holder && <div className="text-neutral-700"><strong>Atas Nama:</strong> {invoiceSettings.bank_account_holder}</div>}
                   </div>
                 )}
               </div>
@@ -388,11 +404,21 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
               </div>
 
               <div>
-                <div className="text-[11px] text-neutral-500 mb-14">Hormat Kami,</div>
-                <div className="border-t border-neutral-300 w-44 mx-auto pt-1 font-bold text-neutral-900">
-                  {document.sales_name || 'Tim Sales'}
+                <div className="text-[11px] text-neutral-500 mb-2">Hormat Kami,</div>
+                <div className="h-20 flex items-end justify-center gap-2 mb-1">
+                  {invoiceSettings?.signatory_signature_url && (
+                    <img src={invoiceSettings.signatory_signature_url} alt="Tanda tangan" className="max-h-16 max-w-28 object-contain" />
+                  )}
+                  {invoiceSettings?.company_stamp_url && (
+                    <img src={invoiceSettings.company_stamp_url} alt="Stempel perusahaan" className="max-h-16 max-w-20 object-contain" />
+                  )}
                 </div>
-                <div className="text-[10px] text-[#c5a059] font-bold">CAPTAIN KONVEKSI</div>
+                <div className="border-t border-neutral-300 w-44 mx-auto pt-1 font-bold text-neutral-900">
+                  {invoiceSettings?.signatory_name || document.sales_name || 'Tim Sales'}
+                </div>
+                <div className="text-[10px] text-[#c5a059] font-bold">
+                  {invoiceSettings?.signatory_role || companyName}
+                </div>
               </div>
             </div>
           </div>
