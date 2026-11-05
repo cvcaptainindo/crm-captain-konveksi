@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext.js';
 import {
   LayoutDashboard,
@@ -12,8 +12,9 @@ import {
   X,
   DollarSign,
   UserCheck,
-  MessageSquare,
   FileText,
+  Settings,
+  ChevronDown,
 } from 'lucide-react';
 
 export type NavTab =
@@ -44,6 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
 }) => {
   const { isAdmin, user } = useAuth();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleNav = (tab: NavTab) => {
     onSelectTab(tab);
@@ -56,18 +58,54 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'transactions' as NavTab, label: 'Transaksi & Omzet', icon: DollarSign, adminOnly: false },
     { id: 'schedule' as NavTab, label: 'Agenda Follow-Up', icon: CalendarClock, adminOnly: false },
     { id: 'templates' as NavTab, label: 'WhatsApp Templates', icon: MessageSquareText, adminOnly: false },
-    { id: 'wa_workspace' as NavTab, label: 'WhatsApp Web', icon: MessageSquare, adminOnly: false },
     { id: 'wa_monitoring' as NavTab, label: 'Monitoring Follow-Up WA', icon: FileText, adminOnly: true },
-    { id: 'sales_mgmt' as NavTab, label: 'Kelola Akun Sales', icon: UserCheck, adminOnly: true },
-    { id: 'invoice_settings' as NavTab, label: 'Pengaturan Invoice', icon: FileText, adminOnly: true },
-    { id: 'rules' as NavTab, label: 'Aturan Follow-Up', icon: Sliders, adminOnly: true },
-    { id: 'audit' as NavTab, label: 'Audit Log Forensik', icon: History, adminOnly: true },
-    { id: 'trash' as NavTab, label: 'Trash / Sampah', icon: Trash2, adminOnly: true },
   ];
+
+  const settingsItems = [
+    { id: 'sales_mgmt' as NavTab, label: 'Kelola Akun Sales', icon: UserCheck },
+    { id: 'invoice_settings' as NavTab, label: 'Pengaturan Invoice', icon: FileText },
+    { id: 'rules' as NavTab, label: 'Aturan Follow-Up', icon: Sliders },
+  ];
+
+  const adminItems = [
+    { id: 'audit' as NavTab, label: 'Audit Log Forensik', icon: History },
+    { id: 'trash' as NavTab, label: 'Trash / Sampah', icon: Trash2 },
+  ];
+
+  const visibleSettings = isAdmin ? settingsItems : [];
+  const settingsActive = visibleSettings.some(item => currentTab === item.id);
+  const showSettings = settingsOpen || settingsActive;
+
+  const renderNavItem = (item: {
+    id: NavTab;
+    label: string;
+    icon: React.ElementType;
+    adminOnly?: boolean;
+  }) => {
+    if (item.adminOnly && !isAdmin) return null;
+
+    const Icon = item.icon;
+    const isActive = currentTab === item.id;
+
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => handleNav(item.id)}
+        className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-medium transition-all text-left min-h-[44px] ${
+          isActive
+            ? 'bg-[#c5a059]/15 text-[#c5a059] border border-[#c5a059]/30 font-bold'
+            : 'text-neutral-400 hover:text-white hover:bg-neutral-800/60 active:bg-neutral-800'
+        }`}
+      >
+        <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#c5a059]' : 'text-neutral-400'}`} />
+        <span className="truncate">{item.label}</span>
+      </button>
+    );
+  };
 
   return (
     <>
-      {/* Mobile backdrop */}
       {isOpenMobile && (
         <div
           className="fixed inset-0 bg-neutral-950/70 z-50 md:hidden backdrop-blur-xs transition-opacity duration-200 print:hidden"
@@ -80,7 +118,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           isOpenMobile ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
         }`}
       >
-        {/* Brand Header */}
         <div className="h-16 px-4 border-b border-neutral-800 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <img
@@ -89,12 +126,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="w-9 h-9 rounded-xl object-cover border border-[#c5a059]/40 shadow-xs shrink-0"
             />
             <div className="min-w-0">
-              <div className="text-xs font-bold text-white tracking-tight leading-tight truncate">CAPTAIN KONVEKSI</div>
-              <div className="text-[10px] text-[#c5a059] font-mono tracking-wider font-semibold">CRM & FOLLOW-UP V1.0</div>
+              <div className="text-xs font-bold text-white tracking-tight leading-tight truncate">
+                CAPTAIN KONVEKSI
+              </div>
+              <div className="text-[10px] text-[#c5a059] font-mono tracking-wider font-semibold">
+                CRM & FOLLOW-UP V1.0
+              </div>
             </div>
           </div>
 
-          {/* Close button on mobile */}
           <button
             onClick={onCloseMobile}
             className="md:hidden min-w-[44px] min-h-[44px] flex items-center justify-center text-neutral-400 hover:text-white rounded-xl active:bg-neutral-800"
@@ -104,7 +144,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* User preview on mobile */}
         {user && (
           <div className="md:hidden p-3 mx-3 mt-3 bg-neutral-800/80 rounded-xl border border-neutral-700/60 flex items-center justify-between">
             <div className="min-w-0">
@@ -123,37 +162,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {/* Navigation list */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           <div className="px-3 pb-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider">
             Menu Operasional
           </div>
 
-          {navItems.map(item => {
-            if (item.adminOnly && !isAdmin) return null;
-            if ((item as any).salesOnly && isAdmin) return null;
-            const Icon = item.icon;
-            const isActive = currentTab === item.id;
+          {navItems.map(item => renderNavItem(item))}
 
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => handleNav(item.id)}
-                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-medium transition-all text-left min-h-[44px] ${
-                  isActive
-                    ? 'bg-[#c5a059]/15 text-[#c5a059] border border-[#c5a059]/30 font-bold'
-                    : 'text-neutral-400 hover:text-white hover:bg-neutral-800/60 active:bg-neutral-800'
-                }`}
-              >
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#c5a059]' : 'text-neutral-400'}`} />
-                <span className="truncate">{item.label}</span>
-              </button>
-            );
-          })}
+          {isAdmin && (
+            <>
+              <div className="pt-4">
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(value => !value)}
+                  aria-expanded={showSettings}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-semibold min-h-[44px] transition-all ${
+                    settingsActive
+                      ? 'bg-[#c5a059]/10 text-[#c5a059]'
+                      : 'text-neutral-300 hover:text-white hover:bg-neutral-800/60'
+                  }`}
+                >
+                  <Settings className="w-4 h-4 shrink-0" />
+                  <span className="flex-1 text-left">Pengaturan</span>
+                  <ChevronDown
+                    className={`w-4 h-4 transition-transform ${showSettings ? 'rotate-180' : ''}`}
+                  />
+                </button>
+
+                {showSettings && (
+                  <div className="mt-1 ml-3 pl-3 border-l border-neutral-700 space-y-1">
+                    {settingsItems.map(item => renderNavItem(item))}
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-4">
+                <div className="px-3 pb-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider">
+                  Administrasi
+                </div>
+                <div className="space-y-1">
+                  {adminItems.map(item => renderNavItem(item))}
+                </div>
+              </div>
+            </>
+          )}
         </nav>
 
-        {/* Footer info */}
         <div className="p-4 border-t border-neutral-800 text-[11px] text-neutral-500">
           <div className="flex items-center gap-1.5 text-neutral-300 font-medium">
             <PhoneCall className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
