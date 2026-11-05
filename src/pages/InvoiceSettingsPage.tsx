@@ -12,6 +12,7 @@ import {
   RefreshCw as ArrowPathIcon,
   Image as PhotoIcon,
   ShieldCheck as ShieldCheckIcon,
+  Upload as ArrowUpTrayIcon,
 } from 'lucide-react';
 import type { InvoiceSettings, InvoiceTerm } from '../types';
 
