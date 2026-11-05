@@ -31,7 +31,7 @@ function getPort(): number {
 const PORT = getPort();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Mount REST API endpoints under /api/v1 and alias under /api
 app.use('/api/v1', apiRouter);

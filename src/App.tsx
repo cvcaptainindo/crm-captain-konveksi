@@ -23,6 +23,7 @@ import { SalesManagementPage } from './pages/SalesManagementPage.js';
 import { SalesWhatsAppConnectPage } from './pages/SalesWhatsAppConnectPage.js';
 import { WhatsAppWorkspacePage } from './pages/WhatsAppWorkspacePage.js';
 import { WhatsAppMonitoringPage } from './pages/WhatsAppMonitoringPage.js';
+import { InvoiceSettingsPage } from './pages/InvoiceSettingsPage.js';
 
 // Modals
 import { CustomerFormModal } from './components/customers/CustomerFormModal.js';
@@ -143,6 +144,8 @@ const MainApp: React.FC = () => {
         return 'Live Screen WhatsApp';
       case 'sales_mgmt':
         return 'Kelola Akun Sales';
+      case 'invoice_settings':
+        return 'Pengaturan Invoice';
       case 'rules':
         return 'Aturan Follow-Up (Admin)';
       case 'audit':
@@ -218,6 +221,8 @@ const MainApp: React.FC = () => {
           {currentTab === 'connect_wa' && !isAdmin && <SalesWhatsAppConnectPage />}
 
           {currentTab === 'sales_mgmt' && isAdmin && <SalesManagementPage />}
+
+          {currentTab === 'invoice_settings' && isAdmin && <InvoiceSettingsPage />}
 
           {currentTab === 'rules' && isAdmin && <FollowUpRulesPage />}
 

@@ -10,6 +10,7 @@ import * as auditCtrl from '../controllers/audit.controller.js';
 import * as expCtrl from '../controllers/export.controller.js';
 import * as trxCtrl from '../controllers/transaction.controller.js';
 import * as docCtrl from '../controllers/document.controller.js';
+import * as invSetCtrl from '../controllers/invoiceSettings.controller.js';
 
 export const apiRouter = Router();
 
@@ -118,6 +119,16 @@ apiRouter.post('/templates/preview', authMiddleware, tplCtrl.previewTemplate);
 apiRouter.get('/audit-logs', authMiddleware, requireAdmin, auditCtrl.getAuditLogs);
 
 // ========================================================
+// ========================================================
+// INVOICE SETTINGS & PAYMENT TERMS (Admin Only)
+// ========================================================
+apiRouter.get('/admin/invoice-settings', authMiddleware, requireAdmin, invSetCtrl.getInvoiceSettings);
+apiRouter.put('/admin/invoice-settings', authMiddleware, requireAdmin, invSetCtrl.updateInvoiceSettings);
+apiRouter.post('/admin/invoice-settings/terms', authMiddleware, requireAdmin, invSetCtrl.addInvoiceTerm);
+apiRouter.put('/admin/invoice-settings/terms/:id', authMiddleware, requireAdmin, invSetCtrl.updateInvoiceTerm);
+apiRouter.delete('/admin/invoice-settings/terms/:id', authMiddleware, requireAdmin, invSetCtrl.deleteInvoiceTerm);
+apiRouter.post('/admin/invoice-settings/terms/reorder', authMiddleware, requireAdmin, invSetCtrl.reorderInvoiceTerms);
+
 // 10. EXPORT (Excel / CSV)
 // ========================================================
 apiRouter.get('/export/customers', authMiddleware, expCtrl.exportCustomers);

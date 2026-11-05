@@ -272,3 +272,70 @@ export interface SalesDocument {
   sales_phone?: string;
   sales_email?: string;
 }
+
+export interface InvoiceTerm {
+  id: number;
+  term_text: string;
+  sort_order: number;
+  term_order?: number;
+  is_active: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface InvoiceCompanySnapshot {
+  company_name: string;
+  company_legal_name?: string | null;
+  legal_name?: string | null;
+  company_logo_url?: string | null;
+  company_address?: string | null;
+  company_whatsapp?: string | null;
+  company_phone?: string | null;
+  company_email?: string | null;
+  company_website?: string | null;
+  nib?: string | null;
+  npwp?: string | null;
+  bank_name?: string | null;
+  bank_branch?: string | null;
+  bank_account_number?: string | null;
+  bank_account_holder?: string | null;
+  signatory_name?: string | null;
+  signatory_role?: string | null;
+  signatory_title?: string | null;
+  signatory_signature_url?: string | null;
+  signature_image_url?: string | null;
+  company_stamp_url?: string | null;
+  stamp_image_url?: string | null;
+  footer_notes?: string | null;
+  terms_list?: string[];
+  terms?: Array<{ id: number; term_text: string; sort_order?: number; term_order?: number }>;
+}
+
+export interface InvoiceSettings {
+  id: number;
+  company_name: string;
+  company_legal_name: string | null;
+  company_logo_url?: string | null;
+  company_address: string | null;
+  company_whatsapp: string | null;
+  company_phone?: string | null;
+  company_email?: string | null;
+  company_website?: string | null;
+  nib?: string | null;
+  npwp?: string | null;
+  bank_name: string | null;
+  bank_account_number: string | null;
+  bank_account_holder: string | null;
+  signatory_name: string | null;
+  signatory_role: string | null;
+  signatory_signature_url: string | null;
+  company_stamp_url: string | null;
+  // Aliases for compatibility
+  legal_name?: string | null;
+  signatory_title?: string | null;
+  signature_image_url?: string | null;
+  stamp_image_url?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  terms?: InvoiceTerm[];
+}
