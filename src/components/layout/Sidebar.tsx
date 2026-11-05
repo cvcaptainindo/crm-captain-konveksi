@@ -59,17 +59,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'schedule' as NavTab, label: 'Agenda Follow-Up', icon: CalendarClock, adminOnly: false },
     { id: 'templates' as NavTab, label: 'WhatsApp Templates', icon: MessageSquareText, adminOnly: false },
     { id: 'wa_monitoring' as NavTab, label: 'Monitoring Follow-Up WA', icon: FileText, adminOnly: true },
+    { id: 'audit' as NavTab, label: 'Audit Log Forensik', icon: History, adminOnly: true },
+    { id: 'trash' as NavTab, label: 'Trash / Sampah', icon: Trash2, adminOnly: true },
   ];
 
   const settingsItems = [
     { id: 'sales_mgmt' as NavTab, label: 'Kelola Akun Sales', icon: UserCheck },
     { id: 'invoice_settings' as NavTab, label: 'Pengaturan Invoice', icon: FileText },
     { id: 'rules' as NavTab, label: 'Aturan Follow-Up', icon: Sliders },
-  ];
-
-  const adminItems = [
-    { id: 'audit' as NavTab, label: 'Audit Log Forensik', icon: History },
-    { id: 'trash' as NavTab, label: 'Trash / Sampah', icon: Trash2 },
   ];
 
   const visibleSettings = isAdmin ? settingsItems : [];
@@ -196,14 +193,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </div>
 
-              <div className="pt-4">
-                <div className="px-3 pb-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider">
-                  Administrasi
-                </div>
-                <div className="space-y-1">
-                  {adminItems.map(item => renderNavItem(item))}
-                </div>
-              </div>
             </>
           )}
         </nav>
