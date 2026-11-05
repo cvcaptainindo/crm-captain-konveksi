@@ -267,7 +267,7 @@ export const InvoiceSettingsPage: React.FC = () => {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[500px]">
-        <ArrowPathIcon className="w-10 h-10 text-blue-600 animate-spin mb-3" />
+        <ArrowPathIcon className="w-10 h-10 text-[#c5a059] animate-spin mb-3" />
         <p className="text-gray-600 font-medium">Memuat pengaturan invoice perusahaan...</p>
       </div>
     );
@@ -278,7 +278,7 @@ export const InvoiceSettingsPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-gray-200 mb-8 gap-4">
         <div>
-          <div className="flex items-center gap-2 text-blue-600 mb-1">
+          <div className="flex items-center gap-2 text-[#c5a059] mb-1">
             <ShieldCheckIcon className="w-5 h-5" />
             <span className="text-xs font-semibold tracking-wider uppercase">Menu Khusus Admin (RBAC Strict)</span>
           </div>
@@ -293,7 +293,7 @@ export const InvoiceSettingsPage: React.FC = () => {
         <button
           onClick={() => handleSaveSettings()}
           disabled={saving}
-          className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-[#c5a059] hover:bg-[#b38f48] text-neutral-950 font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50"
         >
           {saving ? (
             <>
@@ -330,7 +330,7 @@ export const InvoiceSettingsPage: React.FC = () => {
           onClick={() => setActiveTab('company')}
           className={`flex items-center gap-2 py-3 px-4 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
             activeTab === 'company'
-              ? 'border-blue-600 text-blue-600'
+              ? 'border-[#c5a059] text-[#c5a059]'
               : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
           }`}
         >
@@ -341,7 +341,7 @@ export const InvoiceSettingsPage: React.FC = () => {
           onClick={() => setActiveTab('bank')}
           className={`flex items-center gap-2 py-3 px-4 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
             activeTab === 'bank'
-              ? 'border-blue-600 text-blue-600'
+              ? 'border-[#c5a059] text-[#c5a059]'
               : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
           }`}
         >
@@ -352,7 +352,7 @@ export const InvoiceSettingsPage: React.FC = () => {
           onClick={() => setActiveTab('signatory')}
           className={`flex items-center gap-2 py-3 px-4 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
             activeTab === 'signatory'
-              ? 'border-blue-600 text-blue-600'
+              ? 'border-[#c5a059] text-[#c5a059]'
               : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
           }`}
         >
@@ -363,7 +363,7 @@ export const InvoiceSettingsPage: React.FC = () => {
           onClick={() => setActiveTab('terms')}
           className={`flex items-center gap-2 py-3 px-4 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
             activeTab === 'terms'
-              ? 'border-blue-600 text-blue-600'
+              ? 'border-[#c5a059] text-[#c5a059]'
               : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
           }`}
         >
@@ -374,7 +374,7 @@ export const InvoiceSettingsPage: React.FC = () => {
           onClick={() => setActiveTab('preview')}
           className={`flex items-center gap-2 py-3 px-4 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
             activeTab === 'preview'
-              ? 'border-blue-600 text-blue-600'
+              ? 'border-[#c5a059] text-[#c5a059]'
               : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
           }`}
         >
@@ -387,7 +387,7 @@ export const InvoiceSettingsPage: React.FC = () => {
       {activeTab === 'company' && (
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
           <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <BuildingOffice2Icon className="w-5 h-5 text-blue-600" />
+            <BuildingOffice2Icon className="w-5 h-5 text-[#c5a059]" />
             Informasi Legal & Operasional Perusahaan
           </h2>
           <p className="text-sm text-gray-500 mb-6">
@@ -447,7 +447,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={companyName}
                 onChange={e => setCompanyName(e.target.value)}
                 placeholder="Nama brand atau perusahaan"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -460,7 +460,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={companyLegalName}
                 onChange={e => setCompanyLegalName(e.target.value)}
                 placeholder="Contoh: PT Kreasi Indo Mandiri / CV Berkah Jaya"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -473,7 +473,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={companyAddress}
                 onChange={e => setCompanyAddress(e.target.value)}
                 placeholder="Alamat lengkap perusahaan beserta kota dan kode pos"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -486,7 +486,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={companyPhone}
                 onChange={e => setCompanyPhone(e.target.value)}
                 placeholder="Contoh: (021) 1234567 atau 08123456789"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -499,7 +499,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={companyWhatsapp}
                 onChange={e => setCompanyWhatsapp(e.target.value)}
                 placeholder="Contoh: 081234567890"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -512,7 +512,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={companyEmail}
                 onChange={e => setCompanyEmail(e.target.value)}
                 placeholder="info@perusahaan.com"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -525,7 +525,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={companyWebsite}
                 onChange={e => setCompanyWebsite(e.target.value)}
                 placeholder="www.perusahaan.com"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -538,7 +538,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={nib}
                 onChange={e => setNib(e.target.value)}
                 placeholder="Nomor NIB resmi"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -551,7 +551,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={npwp}
                 onChange={e => setNpwp(e.target.value)}
                 placeholder="Nomor NPWP resmi"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
           </div>
@@ -562,7 +562,7 @@ export const InvoiceSettingsPage: React.FC = () => {
       {activeTab === 'bank' && (
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
           <h2 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
-            <CreditCardIcon className="w-5 h-5 text-blue-600" />
+            <CreditCardIcon className="w-5 h-5 text-[#c5a059]" />
             Rekening Bank Resmi Perusahaan
           </h2>
           <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-lg mb-6 text-xs text-amber-800">
@@ -579,7 +579,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={bankName}
                 onChange={e => setBankName(e.target.value)}
                 placeholder="Contoh: BCA / Mandiri / BNI / BRI"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -592,7 +592,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={bankAccountNumber}
                 onChange={e => setBankAccountNumber(e.target.value)}
                 placeholder="Nomor rekening bank resmi"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -605,7 +605,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={bankAccountHolder}
                 onChange={e => setBankAccountHolder(e.target.value)}
                 placeholder="Nama pemilik rekening bank"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
           </div>
@@ -616,7 +616,7 @@ export const InvoiceSettingsPage: React.FC = () => {
       {activeTab === 'signatory' && (
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
           <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <IdentificationIcon className="w-5 h-5 text-blue-600" />
+            <IdentificationIcon className="w-5 h-5 text-[#c5a059]" />
             Identitas Penandatangan, Tanda Tangan & Stempel Resmi
           </h2>
           <p className="text-sm text-gray-500 mb-6">
@@ -633,7 +633,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={signatoryName}
                 onChange={e => setSignatoryName(e.target.value)}
                 placeholder="Nama pejabat penandatangan resmi"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
 
@@ -646,7 +646,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 value={signatoryRole}
                 onChange={e => setSignatoryRole(e.target.value)}
                 placeholder="Contoh: Pimpinan / Penanggung Jawab Keuangan"
-                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               />
             </div>
           </div>
@@ -683,7 +683,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 type="file"
                 accept="image/png, image/jpeg, image/webp"
                 onChange={e => handleFileUpload(e, 'signature')}
-                className="block w-full text-xs text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                className="block w-full text-xs text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-neutral-100 file:text-neutral-700 hover:file:bg-neutral-200"
               />
             </div>
 
@@ -718,7 +718,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                 type="file"
                 accept="image/png, image/jpeg, image/webp"
                 onChange={e => handleFileUpload(e, 'stamp')}
-                className="block w-full text-xs text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                className="block w-full text-xs text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-neutral-100 file:text-neutral-700 hover:file:bg-neutral-200"
               />
             </div>
           </div>
@@ -731,7 +731,7 @@ export const InvoiceSettingsPage: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                <DocumentCheckIcon className="w-5 h-5 text-blue-600" />
+                <DocumentCheckIcon className="w-5 h-5 text-[#c5a059]" />
                 Daftar Syarat & Ketentuan Invoice
               </h2>
               <p className="text-sm text-gray-500">
@@ -747,13 +747,13 @@ export const InvoiceSettingsPage: React.FC = () => {
               value={newTermText}
               onChange={e => setNewTermText(e.target.value)}
               placeholder="Ketik syarat atau ketentuan baru..."
-              className="flex-1 px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="flex-1 px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059]"
               onKeyDown={e => e.key === 'Enter' && handleAddTerm()}
             />
             <button
               type="button"
               onClick={handleAddTerm}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm flex items-center gap-1.5 transition-colors"
+              className="px-4 py-2.5 bg-[#c5a059] hover:bg-[#b38f48] text-neutral-950 font-medium rounded-lg text-sm flex items-center gap-1.5 transition-colors"
             >
               <PlusIcon className="w-4 h-4" />
               <span>Tambah</span>
@@ -773,7 +773,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                   className="flex items-center justify-between p-3.5 bg-gray-50 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors"
                 >
                   <div className="flex items-start gap-3 flex-1">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">
+                    <span className="w-6 h-6 rounded-full bg-[#c5a059]/15 text-neutral-800 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">
                       {index + 1}
                     </span>
 
@@ -783,7 +783,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                           type="text"
                           value={editingTermText}
                           onChange={e => setEditingTermText(e.target.value)}
-                          className="flex-1 px-3 py-1.5 border border-blue-400 rounded-md text-sm bg-white"
+                          className="flex-1 px-3 py-1.5 border border-[#c5a059]/60 rounded-md text-sm bg-white"
                           onKeyDown={e => e.key === 'Enter' && handleUpdateTerm(term.id)}
                         />
                         <button
@@ -816,7 +816,7 @@ export const InvoiceSettingsPage: React.FC = () => {
                           setEditingTermId(term.id);
                           setEditingTermText(term.term_text);
                         }}
-                        className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
+                        className="p-1.5 text-gray-500 hover:text-[#c5a059] hover:bg-neutral-100 rounded"
                         title="Edit Syarat"
                       >
                         <PencilSquareIcon className="w-4 h-4" />
@@ -842,10 +842,10 @@ export const InvoiceSettingsPage: React.FC = () => {
         <div className="bg-white rounded-xl border border-gray-200 p-8 shadow-sm">
           <div className="mb-4 pb-3 border-b border-gray-200 flex justify-between items-center">
             <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <PhotoIcon className="w-5 h-5 text-blue-600" />
+              <PhotoIcon className="w-5 h-5 text-[#c5a059]" />
               Preview Tampilan Invoice A4 (Master Template)
             </h2>
-            <span className="text-xs bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full font-semibold">
+            <span className="text-xs bg-[#c5a059]/10 text-neutral-800 px-2.5 py-1 rounded-full font-semibold">
               Format Standar A4
             </span>
           </div>
@@ -897,8 +897,8 @@ export const InvoiceSettingsPage: React.FC = () => {
             </div>
 
             {/* Bank details box */}
-            <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-4 mb-6">
-              <span className="block text-xs font-bold text-blue-900 uppercase tracking-wider mb-2">
+            <div className="bg-[#c5a059]/10 border border-[#c5a059]/30 rounded-lg p-4 mb-6">
+              <span className="block text-xs font-bold text-neutral-800 uppercase tracking-wider mb-2">
                 Informasi Pembayaran / Rekening Bank:
               </span>
               {bankName && bankAccountNumber ? (
