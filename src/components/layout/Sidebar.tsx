@@ -12,8 +12,6 @@ import {
   X,
   DollarSign,
   UserCheck,
-  Tv,
-  Radio,
   MessageSquare,
   FileText,
 } from 'lucide-react';
@@ -25,9 +23,7 @@ export type NavTab =
   | 'schedule'
   | 'templates'
   | 'wa_workspace'
-  | 'connect_wa'
   | 'wa_monitoring'
-  | 'screen_monitoring'
   | 'sales_mgmt'
   | 'invoice_settings'
   | 'rules'
@@ -61,9 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'schedule' as NavTab, label: 'Agenda Follow-Up', icon: CalendarClock, adminOnly: false },
     { id: 'templates' as NavTab, label: 'WhatsApp Templates', icon: MessageSquareText, adminOnly: false },
     { id: 'wa_workspace' as NavTab, label: 'WhatsApp Web', icon: MessageSquare, adminOnly: false },
-    { id: 'connect_wa' as NavTab, label: 'Live Screen WA', icon: Radio, adminOnly: false, salesOnly: true },
     { id: 'wa_monitoring' as NavTab, label: 'Monitoring Follow-Up WA', icon: FileText, adminOnly: true },
-    { id: 'screen_monitoring' as NavTab, label: 'Live Monitor WA', icon: Tv, adminOnly: true },
     { id: 'sales_mgmt' as NavTab, label: 'Kelola Akun Sales', icon: UserCheck, adminOnly: true },
     { id: 'invoice_settings' as NavTab, label: 'Pengaturan Invoice', icon: FileText, adminOnly: true },
     { id: 'rules' as NavTab, label: 'Aturan Follow-Up', icon: Sliders, adminOnly: true },

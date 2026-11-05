@@ -20,7 +20,6 @@ import { AuditLogsPage } from './pages/AuditLogsPage.js';
 import { TrashPage } from './pages/TrashPage.js';
 import { TransactionsPage } from './pages/TransactionsPage.js';
 import { SalesManagementPage } from './pages/SalesManagementPage.js';
-import { SalesWhatsAppConnectPage } from './pages/SalesWhatsAppConnectPage.js';
 import { WhatsAppWorkspacePage } from './pages/WhatsAppWorkspacePage.js';
 import { WhatsAppMonitoringPage } from './pages/WhatsAppMonitoringPage.js';
 import { InvoiceSettingsPage } from './pages/InvoiceSettingsPage.js';
@@ -140,8 +139,6 @@ const MainApp: React.FC = () => {
         return 'WhatsApp Web Workspace (Sales)';
       case 'wa_monitoring':
         return 'Monitoring Follow-Up WhatsApp (Admin)';
-      case 'connect_wa':
-        return 'Live Screen WhatsApp';
       case 'sales_mgmt':
         return 'Kelola Akun Sales';
       case 'invoice_settings':
@@ -218,7 +215,6 @@ const MainApp: React.FC = () => {
 
           {currentTab === 'wa_monitoring' && isAdmin && <WhatsAppMonitoringPage />}
 
-          {currentTab === 'connect_wa' && !isAdmin && <SalesWhatsAppConnectPage />}
 
           {currentTab === 'sales_mgmt' && isAdmin && <SalesManagementPage />}
 
