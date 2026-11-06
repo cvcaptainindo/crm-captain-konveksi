@@ -222,17 +222,19 @@ export const TransactionsPage: React.FC = () => {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setEditingTransaction(null);
-              setIsFormOpen(true);
-            }}
-            className="min-h-[44px] px-4 py-2 bg-neutral-900 hover:bg-neutral-800 active:bg-black text-[#c5a059] rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs border border-[#c5a059]/30"
-          >
-            <Plus className="w-4 h-4 text-[#c5a059]" />
-            <span>+ Catat Closing</span>
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingTransaction(null);
+                setIsFormOpen(true);
+              }}
+              className="min-h-[44px] px-4 py-2 bg-neutral-900 hover:bg-neutral-800 active:bg-black text-[#c5a059] rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs border border-[#c5a059]/30"
+            >
+              <Plus className="w-4 h-4 text-[#c5a059]" />
+              <span>+ Catat Closing</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -439,17 +441,19 @@ export const TransactionsPage: React.FC = () => {
       ) : transactions.length === 0 ? (
         <div className="bg-white rounded-2xl p-8 border border-neutral-200 text-center text-xs text-neutral-500 space-y-2">
           <p>Belum ada data transaksi yang sesuai dengan filter.</p>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingTransaction(null);
-              setIsFormOpen(true);
-            }}
-            className="px-3.5 py-2 bg-neutral-900 text-[#c5a059] hover:bg-neutral-800 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 border border-[#c5a059]/30 shadow-2xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Catat Closing Baru</span>
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingTransaction(null);
+                setIsFormOpen(true);
+              }}
+              className="px-3.5 py-2 bg-neutral-900 text-[#c5a059] hover:bg-neutral-800 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 border border-[#c5a059]/30 shadow-2xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Catat Closing Baru</span>
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
@@ -516,19 +520,21 @@ export const TransactionsPage: React.FC = () => {
 
                 {/* Card Actions */}
                 <div className="flex items-center justify-end gap-2 pt-1 border-t border-neutral-100">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingTransaction(t);
-                      setIsFormOpen(true);
-                    }}
-                    className="min-h-[38px] px-3 py-1.5 border border-neutral-200 bg-white hover:bg-neutral-50 active:bg-neutral-100 rounded-xl text-xs font-semibold text-neutral-700 flex items-center gap-1.5 transition-colors"
-                  >
-                    <Edit2 className="w-3.5 h-3.5 text-neutral-500" />
-                    <span>Edit</span>
-                  </button>
+                  {!t.invoice_id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingTransaction(t);
+                        setIsFormOpen(true);
+                      }}
+                      className="min-h-[38px] px-3 py-1.5 border border-neutral-200 bg-white hover:bg-neutral-50 active:bg-neutral-100 rounded-xl text-xs font-semibold text-neutral-700 flex items-center gap-1.5 transition-colors"
+                    >
+                      <Edit2 className="w-3.5 h-3.5 text-neutral-500" />
+                      <span>Edit</span>
+                    </button>
+                  )}
 
-                  {isAdmin && (
+                  {isAdmin && !t.invoice_id && (
                     <button
                       type="button"
                       onClick={() => setDeletingId(t.id)}

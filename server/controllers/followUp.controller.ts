@@ -197,9 +197,6 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
     new_status_id,
     custom_next_date,
     advance_step = true,
-    closing_amount,
-    closing_product,
-    closing_notes,
   } = req.body;
 
   if (!customer_id || !result_status) {
@@ -239,8 +236,6 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
       targetStep += 1;
     }
 
-    const numClosingAmount = Number(closing_amount);
-    const hasClosing = !isNaN(numClosingAmount) && numClosingAmount > 0;
 
     const result = await withTransaction(async (conn) => {
       // 1. Insert Activity
@@ -271,43 +266,6 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
         targetStatusId = parseInt(new_status_id, 10);
       }
 
-      let createdTransaction: any = null;
-      if (hasClosing) {
-        // Record closing transaction
-        const [trxRes] = await conn.execute<any>(
-          `INSERT INTO transactions (
-            customer_id, sales_id, transaction_date, product, description,
-            amount, status, notes, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 'CLOSING', ?, NOW(), NOW())`,
-          [
-            customer.id,
-            customer.assigned_sales_id,
-            today,
-            closing_product ? String(closing_product).trim() : 'Pesanan Konveksi',
-            `Closing dari follow-up (${result_status})`,
-            numClosingAmount,
-            closing_notes || notes || '',
-          ]
-        );
-
-        createdTransaction = {
-          id: trxRes.insertId,
-          customer_id: customer.id,
-          sales_id: customer.assigned_sales_id,
-          transaction_date: today,
-          amount: numClosingAmount,
-          status: 'CLOSING',
-        };
-
-        // Auto update customer status to CLOSING status id
-        const [closingStatus] = await conn.query<any[]>(
-          'SELECT id FROM customer_statuses WHERE code = "CLOSING" LIMIT 1'
-        );
-        if (closingStatus && closingStatus.length > 0) {
-          targetStatusId = closingStatus[0].id;
-        }
-      }
-
       // 3. Update customer
       await conn.execute(
         `UPDATE customers SET
@@ -317,7 +275,7 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
         [today, finalNextDate, targetStep, targetStatusId, customer.id]
       );
 
-      return { activityId, createdTransaction, finalNextDate };
+      return { activityId, finalNextDate };
     });
 
     await logAudit({
@@ -332,7 +290,6 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
         channel,
         result_status,
         next_follow_up_date: result.finalNextDate,
-        closing_recorded: result.createdTransaction ? result.createdTransaction.amount : null,
       },
     });
 
@@ -341,13 +298,11 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
 
     res.status(201).json({
       success: true,
-      message: result.createdTransaction
-        ? `Follow-up berhasil dicatat & Closing Rp ${result.createdTransaction.amount.toLocaleString('id-ID')} tersimpan!`
-        : 'Aktivitas follow-up berhasil dicatat & jadwal berikutnya diperbarui.',
+      message: 'Aktivitas follow-up berhasil dicatat & jadwal berikutnya diperbarui.',
       data: {
         activity: createdAct[0],
         customer: updatedCust[0],
-        transaction: result.createdTransaction,
+        transaction: null,
       },
     });
   } catch (err: any) {

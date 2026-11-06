@@ -12,7 +12,6 @@ import {
   Sparkles,
   MessageSquare,
   CheckCircle2,
-  DollarSign,
 } from 'lucide-react';
 
 interface FollowUpActionModalProps {
@@ -44,9 +43,6 @@ export const FollowUpActionModal: React.FC<FollowUpActionModalProps> = ({
   const [newStatusId, setNewStatusId] = useState<number>(0);
   const [advanceStep, setAdvanceStep] = useState(true);
   const [customNextDate, setCustomNextDate] = useState('');
-  const [closingAmount, setClosingAmount] = useState('');
-  const [closingProduct, setClosingProduct] = useState('');
-  const [closingNotes, setClosingNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasOpenedWhatsApp, setHasOpenedWhatsApp] = useState(false);
 
@@ -57,9 +53,6 @@ export const FollowUpActionModal: React.FC<FollowUpActionModalProps> = ({
       setNotes('');
       setResultStatus('Masih Pertimbangan');
       setCustomNextDate('');
-      setClosingAmount('');
-      setClosingProduct('');
-      setClosingNotes('');
       setAdvanceStep(true);
       setHasOpenedWhatsApp(false);
 
@@ -132,8 +125,6 @@ export const FollowUpActionModal: React.FC<FollowUpActionModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      const numClosing = closingAmount ? Number(closingAmount) : undefined;
-
       const res = await apiRequest<{ success: boolean; message: string }>('/follow-ups/activities', {
         method: 'POST',
         body: JSON.stringify({
@@ -146,9 +137,6 @@ export const FollowUpActionModal: React.FC<FollowUpActionModalProps> = ({
           new_status_id: newStatusId !== customer.status_id ? newStatusId : undefined,
           custom_next_date: customNextDate || undefined,
           advance_step: advanceStep,
-          closing_amount: numClosing && !isNaN(numClosing) ? numClosing : undefined,
-          closing_product: closingProduct || customProduct || undefined,
-          closing_notes: closingNotes || undefined,
         }),
       });
 
@@ -299,7 +287,7 @@ export const FollowUpActionModal: React.FC<FollowUpActionModalProps> = ({
                     const val = e.target.value;
                     setResultStatus(val);
                     if (val.includes('Deal')) {
-                      const dealStatus = statuses.find(s => s.code === 'CUSTOMER');
+                      const dealStatus = statuses.find(s => s.code === 'CLOSING');
                       if (dealStatus) setNewStatusId(dealStatus.id);
                     }
                   }}
@@ -330,45 +318,6 @@ export const FollowUpActionModal: React.FC<FollowUpActionModalProps> = ({
                 </select>
               </div>
             </div>
-
-            {/* Optional Closing Deals input if result is Deal / Closing */}
-            {resultStatus === 'Deal / Closing (Customer)' && (
-              <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-xl space-y-2.5">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-900">
-                  <DollarSign className="w-4 h-4 text-[#c5a059]" />
-                  <span>Catat Nilai Closing / Omzet Deals</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-neutral-700 mb-1">
-                      Nominal Closing (Rp)
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min="0"
-                      step="1000"
-                      value={closingAmount}
-                      onChange={e => setClosingAmount(e.target.value)}
-                      placeholder="Contoh: 15000000"
-                      className="w-full min-h-[42px] px-3 py-1.5 text-xs font-mono font-bold border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059] bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-neutral-700 mb-1">
-                      Nama Produk Pesanan
-                    </label>
-                    <input
-                      type="text"
-                      value={closingProduct}
-                      onChange={e => setClosingProduct(e.target.value)}
-                      placeholder="Contoh: 150 pcs Polo Shirt CVC"
-                      className="w-full min-h-[42px] px-3 py-1.5 text-xs border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059] bg-white"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
 
             <div>
               <label className="block text-xs font-semibold text-neutral-700 mb-1">Catatan Tambahan Sales</label>

@@ -1014,17 +1014,19 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                           Transaksi & Omzet ({customerClosings.length} Deals)
                         </h3>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingTransaction(null);
-                          setIsTransactionModalOpen(true);
-                        }}
-                        className="min-h-[36px] px-3 py-1 bg-neutral-900 hover:bg-neutral-800 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1 transition-colors"
-                      >
-                        <Plus className="w-3.5 h-3.5 text-[#c5a059]" />
-                        <span>Catat Closing Manual</span>
-                      </button>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingTransaction(null);
+                            setIsTransactionModalOpen(true);
+                          }}
+                          className="min-h-[36px] px-3 py-1 bg-neutral-900 hover:bg-neutral-800 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1 transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5 text-[#c5a059]" />
+                          <span>Catat Closing Manual</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* Total Lifetime Omzet Summary */}
@@ -1080,16 +1082,18 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                               >
                                 Rp {Number(trx.amount).toLocaleString('id-ID')}
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingTransaction(trx);
-                                  setIsTransactionModalOpen(true);
-                                }}
-                                className="text-[10px] text-neutral-500 hover:text-neutral-800 underline mt-0.5"
-                              >
-                                Edit
-                              </button>
+                              {!trx.invoice_id && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingTransaction(trx);
+                                    setIsTransactionModalOpen(true);
+                                  }}
+                                  className="text-[10px] text-neutral-500 hover:text-neutral-800 underline mt-0.5"
+                                >
+                                  Edit
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}

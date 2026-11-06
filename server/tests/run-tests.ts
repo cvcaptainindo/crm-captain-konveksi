@@ -48,6 +48,17 @@ async function runTest(name: string, fn: () => void | Promise<void>) {
 }
 
 async function runTestSuite() {
+  await runTest('Follow-Up Deal maps customer status to CLOSING and preserves CANCEL option', () => {
+    const modal = fs.readFileSync(path.resolve(process.cwd(), 'src/components/followUp/FollowUpActionModal.tsx'), 'utf-8');
+    const seeds = fs.readFileSync(path.resolve(process.cwd(), 'server/database/seeds.sql'), 'utf-8');
+    assert.strictEqual(modal.includes("statuses.find(s => s.code === 'CLOSING')"), true,
+      'Selecting Deal must map to the CLOSING master status');
+    assert.strictEqual(modal.includes('statuses.map(s => ('), true,
+      'The customer status dropdown must continue to render available statuses');
+    assert.strictEqual(seeds.includes("(5, 'CANCEL', 'Batal / Cancel'"), true,
+      'The CANCEL master status must remain available');
+  });
+
   console.log('========================================================');
   console.log('CRM CAPTAIN KONVEKSI V1.0 - AUTOMATED TEST SUITE');
   console.log('Testing MySQL Migration, Security, RBAC & Core Logic');
@@ -655,6 +666,39 @@ async function runTestSuite() {
     const customerOfSalesB = { id: 10, assigned_sales_id: 3 };
     const canAccess = salesA.role === 'ADMIN' || customerOfSalesB.assigned_sales_id === salesA.id;
     assert.strictEqual(canAccess, false);
+  });
+
+  await runTest('Manual transaction creation is restricted to Admin at the API route', () => {
+    const routesSource = fs.readFileSync(path.resolve(process.cwd(), 'server/routes/api.routes.ts'), 'utf-8');
+    assert.strictEqual(
+      routesSource.includes("apiRouter.post('/transactions', authMiddleware, requireAdmin, trxCtrl.createTransaction);"),
+      true,
+      'POST /transactions must require Admin authorization.'
+    );
+  });
+
+  await runTest('Follow-up activities do not create omzet transactions', () => {
+    const controllerSource = fs.readFileSync(path.resolve(process.cwd(), 'server/controllers/followUp.controller.ts'), 'utf-8');
+    const handlerStart = controllerSource.indexOf('export async function logActivity');
+    const handlerEnd = controllerSource.indexOf('export async function getCustomerActivities', handlerStart);
+    assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, 'Follow-up handler must be present.');
+    const handlerSource = controllerSource.slice(handlerStart, handlerEnd);
+    assert.strictEqual(handlerSource.includes('INSERT INTO transactions'), false);
+    assert.strictEqual(handlerSource.includes('closing_amount'), false);
+
+    const modalSource = fs.readFileSync(path.resolve(process.cwd(), 'src/components/followUp/FollowUpActionModal.tsx'), 'utf-8');
+    assert.strictEqual(modalSource.includes('closing_amount'), false);
+  });
+
+  await runTest('Sales UI keeps manual omzet entry Admin-only and invoice-linked transactions read-only', () => {
+    const customerDetailSource = fs.readFileSync(path.resolve(process.cwd(), 'src/components/customers/CustomerDetailModal.tsx'), 'utf-8');
+    assert.strictEqual(customerDetailSource.includes('{isAdmin && (' + '\n' + '                        <button'), true, 'Manual transaction entry in Customer Detail must be Admin-only.');
+    assert.strictEqual(customerDetailSource.includes('{!trx.invoice_id && ('), true, 'Invoice-linked transactions must not show Edit.');
+
+    const transactionsPageSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/TransactionsPage.tsx'), 'utf-8');
+    assert.strictEqual(transactionsPageSource.includes('{isAdmin && (' + '\n' + '            <button'), true, 'Manual transaction creation in Transactions Page must be Admin-only.');
+    assert.strictEqual(transactionsPageSource.includes('{!t.invoice_id && ('), true, 'Invoice-linked transactions must not show Edit.');
+    assert.strictEqual(transactionsPageSource.includes('{isAdmin && !t.invoice_id && ('), true, 'Invoice-linked transactions must not show Delete.');
   });
 
   // ========================================================
