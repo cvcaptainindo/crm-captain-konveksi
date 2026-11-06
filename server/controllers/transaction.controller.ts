@@ -541,6 +541,96 @@ export async function getOmzetOverview(req: AuthenticatedRequest, res: Response)
       ];
     }
 
+    // 3. Period-based financial summary for the Transactions page.
+    // Closing omzet is recognized by transaction_date; cash receipts and refunds
+    // are recognized by their own ledger dates. Pending refunds are not cash outflows.
+    const requestedMonth = String(req.query.month || currentMonth.slice(5, 7));
+    const requestedYear = String(req.query.year || currentMonth.slice(0, 4));
+    if (!/^\d{2}$/.test(requestedMonth) || Number(requestedMonth) < 1 || Number(requestedMonth) > 12 ||
+        !/^\d{4}$/.test(requestedYear)) {
+      res.status(400).json({ success: false, message: 'Filter bulan atau tahun tidak valid.' });
+      return;
+    }
+    const periodStart = `${requestedYear}-${requestedMonth}-01`;
+    const periodEnd = new Date(Date.UTC(Number(requestedYear), Number(requestedMonth), 0))
+      .toISOString().slice(0, 10);
+    const yearStart = `${requestedYear}-01-01`;
+    const yearEnd = `${requestedYear}-12-31`;
+    const selectedSalesId = !isSales && req.query.sales_id && req.query.sales_id !== 'all'
+      ? Number(req.query.sales_id) : null;
+    const salesFilter = isSales
+      ? ' AND t.sales_id = ?'
+      : selectedSalesId ? ' AND t.sales_id = ?' : '';
+    const salesParams = isSales ? [req.user!.id] : selectedSalesId ? [selectedSalesId] : [];
+
+    const [periodOmzetRows] = await pool.query<any[]>(
+      `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS closing_count
+       FROM transactions t
+       WHERE t.status = 'CLOSING' AND t.transaction_date >= ? AND t.transaction_date <= ?${salesFilter}`,
+      [periodStart, periodEnd, ...salesParams]
+    );
+
+    const documentSalesFilter = isSales
+      ? ' AND c.assigned_sales_id = ?'
+      : selectedSalesId ? ' AND c.assigned_sales_id = ?' : '';
+    const documentSalesParams = isSales ? [req.user!.id] : selectedSalesId ? [selectedSalesId] : [];
+
+    // Aggregate payments and completed refunds independently to avoid multiplying
+    // payment rows by refund rows in the join.
+    const [receivedRows] = await pool.query<any[]>(
+      `SELECT COALESCE(SUM(p.amount), 0) AS total
+       FROM sales_document_payments p
+       JOIN sales_documents d ON d.id = p.document_id AND d.doc_type = 'INVOICE'
+       JOIN customers c ON c.id = d.customer_id
+       WHERE p.payment_date >= ? AND p.payment_date <= ?${documentSalesFilter}`,
+      [periodStart, periodEnd, ...documentSalesParams]
+    );
+    const [refundRows] = await pool.query<any[]>(
+      `SELECT COALESCE(SUM(r.amount), 0) AS total
+       FROM sales_document_refunds r
+       JOIN sales_documents d ON d.id = r.document_id AND d.doc_type = 'INVOICE'
+       JOIN customers c ON c.id = d.customer_id
+       WHERE r.status = 'COMPLETED' AND r.refund_date >= ? AND r.refund_date <= ?${documentSalesFilter}`,
+      [periodStart, periodEnd, ...documentSalesParams]
+    );
+
+    const [receivableRows] = await pool.query<any[]>(
+      `SELECT
+         COALESCE(SUM(GREATEST(0, d.total_amount - COALESCE(NULLIF(p.total_paid, 0), d.paid_amount, 0))), 0) AS balance,
+         COUNT(CASE WHEN GREATEST(0, d.total_amount - COALESCE(NULLIF(p.total_paid, 0), d.paid_amount, 0)) > 0 THEN 1 END) AS unpaid_count
+       FROM sales_documents d
+       JOIN customers c ON c.id = d.customer_id
+       LEFT JOIN (
+         SELECT document_id, SUM(amount) AS total_paid
+         FROM sales_document_payments GROUP BY document_id
+       ) p ON p.document_id = d.id
+       WHERE d.doc_type = 'INVOICE'
+         AND d.status IN ('UNPAID', 'PARTIAL', 'OVERDUE', 'CLOSING')${documentSalesFilter}`,
+      documentSalesParams
+    );
+
+    const [annualRows] = await pool.query<any[]>(
+      `SELECT MONTH(t.transaction_date) AS month,
+              COALESCE(SUM(t.amount), 0) AS omzet,
+              COUNT(*) AS closing_count
+       FROM transactions t
+       WHERE t.status = 'CLOSING' AND t.transaction_date >= ? AND t.transaction_date <= ?${salesFilter}
+       GROUP BY MONTH(t.transaction_date)
+       ORDER BY MONTH(t.transaction_date)`,
+      [yearStart, yearEnd, ...salesParams]
+    );
+    const annualByMonth = new Map(annualRows.map(row => [Number(row.month), row]));
+    const annualRecap = Array.from({ length: 12 }, (_, index) => {
+      const row = annualByMonth.get(index + 1);
+      return {
+        month: index + 1,
+        omzet: Number(row?.omzet) || 0,
+        closing_count: Number(row?.closing_count) || 0,
+      };
+    });
+    const received = Number(receivedRows[0]?.total) || 0;
+    const refunded = Number(refundRows[0]?.total) || 0;
+
     res.json({
       success: true,
       data: {
@@ -554,6 +644,18 @@ export async function getOmzetOverview(req: AuthenticatedRequest, res: Response)
           omzet_today: omzetToday,
           by_sales: omzetBySales,
         },
+        period_summary: {
+          month: requestedMonth,
+          year: requestedYear,
+          total_sales: Number(periodOmzetRows[0]?.total) || 0,
+          closing_count: Number(periodOmzetRows[0]?.closing_count) || 0,
+          payments_received: Math.round((received - refunded) * 100) / 100,
+          gross_payments_received: received,
+          completed_refunds: refunded,
+          outstanding_receivables: Number(receivableRows[0]?.balance) || 0,
+          unpaid_invoice_count: Number(receivableRows[0]?.unpaid_count) || 0,
+        },
+        annual_recap: annualRecap,
       },
     });
   } catch (err: any) {

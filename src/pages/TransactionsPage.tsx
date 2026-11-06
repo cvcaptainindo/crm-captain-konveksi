@@ -52,6 +52,11 @@ export const TransactionsPage: React.FC = () => {
 
   // Overview stats from backend
   const [overviewStats, setOverviewStats] = useState<any>(null);
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(String(now.getMonth() + 1).padStart(2, '0'));
+  const [selectedYear, setSelectedYear] = useState(String(now.getFullYear()));
+  const [periodSummary, setPeriodSummary] = useState<any>(null);
+  const [annualRecap, setAnnualRecap] = useState<Array<{ month: number; omzet: number; closing_count: number }>>([]);
 
   // Modals
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -108,19 +113,24 @@ export const TransactionsPage: React.FC = () => {
 
   const loadOverview = async () => {
     try {
-      const res = await apiRequest<{ success: boolean; data: any }>('/transactions/overview');
+      const params = new URLSearchParams({ month: selectedMonth, year: selectedYear });
+      if (selectedSalesId !== 'all') params.append('sales_id', selectedSalesId);
+      const res = await apiRequest<{ success: boolean; data: any }>(`/transactions/overview?${params.toString()}`);
       if (res.success) {
         setOverviewStats(res.data.omzet_summary);
+        setPeriodSummary(res.data.period_summary || null);
+        setAnnualRecap(res.data.annual_recap || []);
       }
     } catch (err) {
       console.error('Error fetching omzet overview', err);
+      showToast('Gagal memuat ringkasan omzet dan pembayaran.', 'error');
     }
   };
 
   useEffect(() => {
     loadTransactions();
     loadOverview();
-  }, [period, selectedSalesId, statusFilter, startDate, endDate]);
+  }, [period, selectedSalesId, statusFilter, startDate, endDate, selectedMonth, selectedYear]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,66 +248,94 @@ export const TransactionsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Backend Omzet KPI Cards - Consistent Base Color (White Surface + Subtle Border + Minimal Indicators) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
-        {/* Total Omzet Closing */}
-        <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-neutral-200/90 shadow-2xs flex flex-col justify-between min-h-[105px]">
-          <div className="flex items-center justify-between text-neutral-500">
-            <span className="text-[11px] font-semibold uppercase tracking-wider flex items-center">
-              <span className="w-2 h-2 rounded-full bg-[#c5a059] inline-block mr-1.5" />
-              Total Omzet Closing
-            </span>
-            <DollarSign className="w-3.5 h-3.5 text-[#c5a059]" />
+      {/* Period selector and financial KPI */}
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-neutral-200/80 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-neutral-900">Ringkasan Keuangan</h2>
+            <p className="text-[11px] text-neutral-500 mt-0.5">Omzet dan pembayaran berdasarkan periode yang dipilih.</p>
           </div>
-          <div className="my-1 text-base sm:text-2xl font-extrabold text-neutral-900 font-mono truncate tabular-nums">
-            Rp {summary.total_omzet.toLocaleString('id-ID')}
-          </div>
-          <div className="text-[10px] text-neutral-500">
-            {summary.total_closing_count} deals closing
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <label className="text-[11px] text-neutral-500 font-semibold">
+              Bulan
+              <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
+                className="block mt-1 w-full sm:w-36 min-h-[42px] px-3 border border-neutral-300 rounded-xl bg-white text-xs text-neutral-800">
+                {[
+                  'Januari','Februari','Maret','April','Mei','Juni',
+                  'Juli','Agustus','September','Oktober','November','Desember'
+                ].map((month, index) => (
+                  <option key={index} value={String(index + 1).padStart(2, '0')}>{month}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-[11px] text-neutral-500 font-semibold">
+              Tahun
+              <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)}
+                className="block mt-1 w-full sm:w-28 min-h-[42px] px-3 border border-neutral-300 rounded-xl bg-white text-xs text-neutral-800">
+                {Array.from({ length: Math.max(7, now.getFullYear() - 2019 + 2) }, (_, index) => now.getFullYear() + 1 - index).map(year => (
+                  <option key={year} value={String(year)}>{year}</option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
-
-        {/* Omzet Bulan Ini */}
-        <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-neutral-200/90 shadow-2xs flex flex-col justify-between min-h-[105px]">
-          <div className="flex items-center justify-between text-neutral-500">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">Omzet Bulan Ini</span>
-            <TrendingUp className="w-3.5 h-3.5 text-neutral-400" />
-          </div>
-          <div className="my-1 text-base sm:text-2xl font-extrabold text-neutral-900 font-mono truncate tabular-nums">
-            Rp {(overviewStats?.omzet_this_month || 0).toLocaleString('id-ID')}
-          </div>
-          <div className="text-[10px] text-neutral-400">Bulan berjalan</div>
-        </div>
-
-        {/* Omzet Hari Ini */}
-        <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-neutral-200/90 shadow-2xs flex flex-col justify-between min-h-[105px]">
-          <div className="flex items-center justify-between text-neutral-500">
-            <span className="text-[11px] font-semibold uppercase tracking-wider">Omzet Hari Ini</span>
-            <Calendar className="w-3.5 h-3.5 text-neutral-400" />
-          </div>
-          <div className="my-1 text-base sm:text-2xl font-extrabold text-neutral-900 font-mono truncate tabular-nums">
-            Rp {(overviewStats?.omzet_today || 0).toLocaleString('id-ID')}
-          </div>
-          <div className="text-[10px] text-neutral-400">Transaksi deal hari ini</div>
-        </div>
-
-        {/* Batal / Cancel */}
-        <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-neutral-200/90 shadow-2xs flex flex-col justify-between min-h-[105px]">
-          <div className="flex items-center justify-between text-neutral-500">
-            <span className="text-[11px] font-semibold uppercase tracking-wider flex items-center">
-              <span className="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1.5" />
-              Batal / Cancel
-            </span>
-            <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
-          </div>
-          <div className="my-1 text-base sm:text-2xl font-extrabold text-neutral-900 font-mono truncate tabular-nums">
-            Rp {summary.total_cancel_amount.toLocaleString('id-ID')}
-          </div>
-          <div className="text-[10px] text-rose-600 font-semibold truncate">
-            {summary.total_cancel_count} transaksi dibatalkan
-          </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4 mt-4">
+          {[
+            { label: 'Total Penjualan', value: periodSummary?.total_sales, note: `${periodSummary?.closing_count || 0} closing pada periode ini`, icon: DollarSign },
+            { label: 'Pembayaran Diterima', value: periodSummary?.payments_received, note: 'Pembayaran dikurangi refund selesai', icon: TrendingUp },
+            { label: 'Sisa Piutang', value: periodSummary?.outstanding_receivables, note: 'Saldo invoice aktif saat ini', icon: Calendar },
+            { label: 'Invoice Belum Lunas', value: periodSummary?.unpaid_invoice_count, note: 'Jumlah invoice aktif bersaldo', icon: AlertTriangle, count: true },
+          ].map((item, index) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label} className="bg-neutral-50 p-3.5 sm:p-4 rounded-xl border border-neutral-200 min-h-[112px] flex flex-col justify-between">
+                <div className="flex items-center justify-between gap-2 text-neutral-500">
+                  <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide">{item.label}</span>
+                  <Icon className="w-4 h-4 text-[#c5a059] shrink-0" />
+                </div>
+                <div className="my-2 text-base sm:text-xl font-extrabold text-neutral-900 font-mono tabular-nums truncate">
+                  {periodSummary ? (item.count ? Number(item.value || 0).toLocaleString('id-ID') : `Rp ${Number(item.value || 0).toLocaleString('id-ID')}`) : '—'}
+                </div>
+                <div className="text-[10px] text-neutral-500">{item.note}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
+
+      {/* Annual omzet recap */}
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-neutral-200/80 shadow-2xs">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div>
+            <h2 className="text-sm font-bold text-neutral-900">Rekap Omzet Tahunan {selectedYear}</h2>
+            <p className="text-[11px] text-neutral-500 mt-0.5">Akumulasi closing berdasarkan tanggal transaksi.</p>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="text-[10px] text-neutral-500">Total setahun</div>
+            <div className="text-sm sm:text-base font-extrabold text-neutral-900 font-mono">
+              Rp {annualRecap.reduce((sum, row) => sum + Number(row.omzet || 0), 0).toLocaleString('id-ID')}
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {[
+            'Januari','Februari','Maret','April','Mei','Juni',
+            'Juli','Agustus','September','Oktober','November','Desember'
+          ].map((month, index) => {
+            const row = annualRecap.find(item => item.month === index + 1);
+            return (
+              <div key={month} className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-neutral-50 border border-neutral-100">
+                <div>
+                  <div className="text-xs font-semibold text-neutral-800">{month}</div>
+                  <div className="text-[10px] text-neutral-400">{row?.closing_count || 0} closing</div>
+                </div>
+                <div className="text-xs font-bold font-mono text-neutral-900 text-right">Rp {Number(row?.omzet || 0).toLocaleString('id-ID')}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Breakdown per Sales for Admin */}
       {isAdmin && overviewStats?.by_sales && overviewStats.by_sales.length > 0 && (
         <div className="bg-white p-4 rounded-2xl border border-neutral-200/80 shadow-2xs">
