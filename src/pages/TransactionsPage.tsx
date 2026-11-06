@@ -39,6 +39,7 @@ export const TransactionsPage: React.FC = () => {
   const [selectedSalesId, setSelectedSalesId] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState<string>('');
+  const [appliedSearch, setAppliedSearch] = useState<string>('');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
@@ -81,7 +82,7 @@ export const TransactionsPage: React.FC = () => {
       if (period !== 'all') params.append('period', period);
       if (selectedSalesId !== 'all') params.append('sales_id', selectedSalesId);
       if (statusFilter !== 'all') params.append('status', statusFilter);
-      if (search.trim()) params.append('search', search.trim());
+      if (appliedSearch) params.append('search', appliedSearch);
       if (period === 'custom') {
         if (startDate) params.append('start_date', startDate);
         if (endDate) params.append('end_date', endDate);
@@ -130,11 +131,11 @@ export const TransactionsPage: React.FC = () => {
   useEffect(() => {
     loadTransactions();
     loadOverview();
-  }, [period, selectedSalesId, statusFilter, startDate, endDate, selectedMonth, selectedYear]);
+  }, [period, selectedSalesId, statusFilter, startDate, endDate, selectedMonth, selectedYear, appliedSearch]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    loadTransactions();
+    setAppliedSearch(search.trim());
   };
 
   const handleDelete = async (id: number) => {
@@ -160,7 +161,7 @@ export const TransactionsPage: React.FC = () => {
     if (period !== 'all') params.append('period', period);
     if (selectedSalesId !== 'all') params.append('sales_id', selectedSalesId);
     if (statusFilter !== 'all') params.append('status', statusFilter);
-    if (search.trim()) params.append('search', search.trim());
+    if (appliedSearch) params.append('search', appliedSearch);
 
     if (period === 'custom') {
       if (startDate) params.append('start_date', startDate);

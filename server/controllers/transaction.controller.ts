@@ -246,7 +246,7 @@ export async function createTransaction(req: AuthenticatedRequest, res: Response
       return;
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayDateString();
     const finalDate = transaction_date ? String(transaction_date).trim() : today;
     const finalStatus = status || 'CLOSING';
     const finalManualCustomerName = finalCustomerId === null && manualCustomerName ? manualCustomerName : null;
@@ -494,9 +494,31 @@ export async function getOmzetOverview(req: AuthenticatedRequest, res: Response)
       else if (code === 'INACTIVE') customerSummary.inactive++;
     });
 
+    // 3. Period-based financial summary for the Transactions page.
+    // Closing omzet is recognized by transaction_date; cash receipts and refunds
+    // are recognized by their own ledger dates. Pending refunds are not cash outflows.
+    const requestedMonth = String(req.query.month || currentMonth.slice(5, 7));
+    const requestedYear = String(req.query.year || currentMonth.slice(0, 4));
+    if (!/^\d{2}$/.test(requestedMonth) || Number(requestedMonth) < 1 || Number(requestedMonth) > 12 ||
+        !/^\d{4}$/.test(requestedYear)) {
+      res.status(400).json({ success: false, message: 'Filter bulan atau tahun tidak valid.' });
+      return;
+    }
+    const periodStart = `${requestedYear}-${requestedMonth}-01`;
+    const periodEnd = new Date(Date.UTC(Number(requestedYear), Number(requestedMonth), 0))
+      .toISOString().slice(0, 10);
+    const yearStart = `${requestedYear}-01-01`;
+    const yearEnd = `${requestedYear}-12-31`;
+    const selectedSalesId = !isSales && req.query.sales_id && req.query.sales_id !== 'all'
+      ? Number(req.query.sales_id) : null;
+
     // 2. Transactions
-    const trxFilterSql = isSales ? 'WHERE sales_id = ?' : '';
-    const trxParams = isSales ? [req.user!.id] : [];
+    const trxFilterSql = isSales
+      ? 'WHERE sales_id = ?'
+      : selectedSalesId ? 'WHERE sales_id = ?' : '';
+    const trxParams = isSales
+      ? [req.user!.id]
+      : selectedSalesId ? [selectedSalesId] : [];
 
     const [trxRows] = await pool.query<any[]>(`SELECT * FROM transactions ${trxFilterSql}`, trxParams);
 
@@ -513,16 +535,24 @@ export async function getOmzetOverview(req: AuthenticatedRequest, res: Response)
 
     let omzetBySales: any[] = [];
     if (!isSales) {
+      const salesBreakdownFilter = selectedSalesId ? ' AND u.id = ?' : '';
       const [salesUsers] = await pool.query<any[]>(
         `SELECT 
           u.id AS sales_id, u.name AS sales_name,
-          COALESCE(SUM(CASE WHEN t.status = 'CLOSING' THEN t.amount ELSE 0 END), 0) AS omzet,
-          COUNT(CASE WHEN t.status = 'CLOSING' THEN 1 END) AS closing_count
+          COALESCE(SUM(t.amount), 0) AS omzet,
+          COUNT(t.id) AS closing_count
          FROM users u
-         LEFT JOIN transactions t ON t.sales_id = u.id
-         WHERE u.role = 'SALES'
+         LEFT JOIN transactions t
+           ON t.sales_id = u.id
+           AND t.status = 'CLOSING'
+           AND t.transaction_date >= ?
+           AND t.transaction_date <= ?
+         WHERE u.role = 'SALES'${salesBreakdownFilter}
          GROUP BY u.id
-         ORDER BY omzet DESC`
+         ORDER BY omzet DESC`,
+        selectedSalesId
+          ? [periodStart, periodEnd, selectedSalesId]
+          : [periodStart, periodEnd]
       );
       omzetBySales = salesUsers.map(s => ({
         sales_id: s.sales_id,
@@ -541,23 +571,6 @@ export async function getOmzetOverview(req: AuthenticatedRequest, res: Response)
       ];
     }
 
-    // 3. Period-based financial summary for the Transactions page.
-    // Closing omzet is recognized by transaction_date; cash receipts and refunds
-    // are recognized by their own ledger dates. Pending refunds are not cash outflows.
-    const requestedMonth = String(req.query.month || currentMonth.slice(5, 7));
-    const requestedYear = String(req.query.year || currentMonth.slice(0, 4));
-    if (!/^\d{2}$/.test(requestedMonth) || Number(requestedMonth) < 1 || Number(requestedMonth) > 12 ||
-        !/^\d{4}$/.test(requestedYear)) {
-      res.status(400).json({ success: false, message: 'Filter bulan atau tahun tidak valid.' });
-      return;
-    }
-    const periodStart = `${requestedYear}-${requestedMonth}-01`;
-    const periodEnd = new Date(Date.UTC(Number(requestedYear), Number(requestedMonth), 0))
-      .toISOString().slice(0, 10);
-    const yearStart = `${requestedYear}-01-01`;
-    const yearEnd = `${requestedYear}-12-31`;
-    const selectedSalesId = !isSales && req.query.sales_id && req.query.sales_id !== 'all'
-      ? Number(req.query.sales_id) : null;
     const salesFilter = isSales
       ? ' AND t.sales_id = ?'
       : selectedSalesId ? ' AND t.sales_id = ?' : '';
