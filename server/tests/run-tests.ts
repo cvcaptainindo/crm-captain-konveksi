@@ -677,6 +677,48 @@ async function runTestSuite() {
     );
   });
 
+  await runTest('Manual transaction creation and editing are restricted to Admin', () => {
+    const routesSource = fs.readFileSync(path.resolve(process.cwd(), 'server/routes/api.routes.ts'), 'utf-8');
+    const pageSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/TransactionsPage.tsx'), 'utf-8');
+    const customerDetailSource = fs.readFileSync(path.resolve(process.cwd(), 'src/components/customers/CustomerDetailModal.tsx'), 'utf-8');
+
+    assert.strictEqual(routesSource.includes("apiRouter.put('/transactions/:id', authMiddleware, requireAdmin, trxCtrl.updateTransaction);"), true);
+    assert.strictEqual(pageSource.includes('{isAdmin && !t.invoice_id && ('), true);
+    assert.strictEqual(customerDetailSource.includes('{isAdmin && !trx.invoice_id && ('), true);
+  });
+
+  await runTest('Manual omzet supports optional registered/manual/no customer and optional Sales PIC', () => {
+    const controllerSource = fs.readFileSync(path.resolve(process.cwd(), 'server/controllers/transaction.controller.ts'), 'utf-8');
+    const schemaSource = fs.readFileSync(path.resolve(process.cwd(), 'server/database/schema.sql'), 'utf-8');
+    const migrationSource = fs.readFileSync(path.resolve(process.cwd(), 'server/database/migration_manual_transactions_nullable_customer_sales.sql'), 'utf-8');
+    const modalSource = fs.readFileSync(path.resolve(process.cwd(), 'src/components/transactions/TransactionFormModal.tsx'), 'utf-8');
+
+    assert.strictEqual(schemaSource.includes('customer_id INT UNSIGNED NULL'), true);
+    assert.strictEqual(schemaSource.includes('customer_name_manual VARCHAR(120) NULL'), true);
+    assert.strictEqual(schemaSource.includes('sales_id INT UNSIGNED NULL'), true);
+    assert.strictEqual(migrationSource.includes('MODIFY COLUMN customer_id INT UNSIGNED NULL'), true);
+    assert.strictEqual(migrationSource.includes('MODIFY COLUMN sales_id INT UNSIGNED NULL'), true);
+    assert.strictEqual(controllerSource.includes('customer_name_manual'), true);
+    assert.strictEqual(controllerSource.includes("if (update_customer_status && customer)"), true);
+    assert.strictEqual(modalSource.includes('-- Tanpa Customer --'), true);
+    assert.strictEqual(modalSource.includes('-- Gunakan Nama Customer Manual --'), true);
+    assert.strictEqual(modalSource.includes('-- Tanpa Sales PIC --'), true);
+  });
+
+  await runTest('Transaction list and export search include manual customer name and preserve Admin scope', () => {
+    const controllerSource = fs.readFileSync(path.resolve(process.cwd(), 'server/controllers/transaction.controller.ts'), 'utf-8');
+    const exportSource = fs.readFileSync(path.resolve(process.cwd(), 'server/controllers/export.controller.ts'), 'utf-8');
+    const pageSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/TransactionsPage.tsx'), 'utf-8');
+    const exportServiceSource = fs.readFileSync(path.resolve(process.cwd(), 'server/services/exportService.ts'), 'utf-8');
+
+    assert.strictEqual(controllerSource.includes("LOWER(COALESCE(t.customer_name_manual, '')) LIKE ?"), true);
+    assert.strictEqual(exportSource.includes("LOWER(COALESCE(t.customer_name_manual, '')) LIKE ?"), true);
+    assert.strictEqual(pageSource.includes("{t.invoice_id ? 'Invoice' : 'Manual'}"), true);
+    assert.strictEqual(exportServiceSource.includes("'Sumber Omzet': t.invoice_id ? 'Invoice' : 'Manual'"), true);
+    assert.strictEqual(exportServiceSource.includes("'Tanpa Customer'"), true);
+    assert.strictEqual(exportServiceSource.includes(": '-'))"), true);
+  });
+
   await runTest('Follow-up activities do not create omzet transactions', () => {
     const controllerSource = fs.readFileSync(path.resolve(process.cwd(), 'server/controllers/followUp.controller.ts'), 'utf-8');
     const handlerStart = controllerSource.indexOf('export async function logActivity');
@@ -693,11 +735,11 @@ async function runTestSuite() {
   await runTest('Sales UI keeps manual omzet entry Admin-only and invoice-linked transactions read-only', () => {
     const customerDetailSource = fs.readFileSync(path.resolve(process.cwd(), 'src/components/customers/CustomerDetailModal.tsx'), 'utf-8');
     assert.strictEqual(customerDetailSource.includes('{isAdmin && (' + '\n' + '                        <button'), true, 'Manual transaction entry in Customer Detail must be Admin-only.');
-    assert.strictEqual(customerDetailSource.includes('{!trx.invoice_id && ('), true, 'Invoice-linked transactions must not show Edit.');
+    assert.strictEqual(customerDetailSource.includes('{isAdmin && !trx.invoice_id && ('), true, 'Only Admin may edit manual transactions; invoice-linked rows remain read-only.');
 
     const transactionsPageSource = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/TransactionsPage.tsx'), 'utf-8');
     assert.strictEqual(transactionsPageSource.includes('{isAdmin && (' + '\n' + '            <button'), true, 'Manual transaction creation in Transactions Page must be Admin-only.');
-    assert.strictEqual(transactionsPageSource.includes('{!t.invoice_id && ('), true, 'Invoice-linked transactions must not show Edit.');
+    assert.strictEqual(transactionsPageSource.includes('{isAdmin && !t.invoice_id && ('), true, 'Only Admin may edit manual transactions.');
     assert.strictEqual(transactionsPageSource.includes('{isAdmin && !t.invoice_id && ('), true, 'Invoice-linked transactions must not show Delete.');
   });
 
@@ -880,6 +922,7 @@ async function runTestSuite() {
         customer_name: 'Pak Budi',
         company_name: 'PT Sumber Makmur',
         sales_name: 'Dimas',
+        invoice_id: 1001,
         product: '100 pcs Jaket',
         description: 'Seragam',
         amount: 20000000,
@@ -887,11 +930,33 @@ async function runTestSuite() {
         notes: 'Deal',
         created_at: '2026-10-01T00:00:00Z',
       },
+      {
+        id: 2,
+        transaction_date: '2026-10-02',
+        customer_id: null,
+        customer_name_manual: 'Customer Walk In',
+        customer_name: 'Customer Walk In',
+        sales_id: null,
+        sales_name: '-',
+        invoice_id: null,
+        product: 'Kaos Polos',
+        description: 'Penjualan langsung',
+        amount: 1500000,
+        status: 'CLOSING',
+        notes: '',
+        created_at: '2026-10-02T00:00:00Z',
+      },
     ];
 
     const res = generateTransactionExport(transactions, 'xlsx');
     assert.strictEqual(Buffer.isBuffer(res.buffer), true);
     assert.strictEqual(res.buffer.length > 0, true);
+    const workbook = XLSX.read(res.buffer, { type: 'buffer' });
+    const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets['Laporan Closing Transaksi']);
+    assert.strictEqual(rows[0]['Sumber Omzet'], 'Invoice');
+    assert.strictEqual(rows[1]['Nama Customer'], 'Customer Walk In');
+    assert.strictEqual(rows[1]['Sales PIC'], '-');
+    assert.strictEqual(rows[1]['Sumber Omzet'], 'Manual');
   });
 
   // ========================================================
@@ -1086,6 +1151,7 @@ async function runTestSuite() {
       'LOWER(t.product) LIKE ?',
       "LOWER(COALESCE(t.description, '')) LIKE ?",
       "LOWER(COALESCE(c.name, '')) LIKE ?",
+      "LOWER(COALESCE(t.customer_name_manual, '')) LIKE ?",
       "LOWER(COALESCE(c.company_name, '')) LIKE ?",
     ];
 
@@ -1095,7 +1161,7 @@ async function runTestSuite() {
     }
 
     assert.strictEqual(
-      exportSource.includes('params.push(q, q, q, q)'),
+      exportSource.includes('params.push(q, q, q, q, q)'),
       true,
       'Nilai pencarian harus dikirim melalui parameter SQL'
     );

@@ -100,8 +100,10 @@ export interface FollowUpActivity {
 
 export interface Transaction {
   id: number;
-  customer_id: number;
-  sales_id: number;
+  customer_id: number | null;
+  customer_name_manual?: string | null;
+  sales_id: number | null;
+  invoice_id?: number | null;
   transaction_date: string;
   product: string;
   description: string;

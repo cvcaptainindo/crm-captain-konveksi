@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction, Customer } from '../../types/index.js';
+import { Transaction, Customer, User } from '../../types/index.js';
 import { apiRequest } from '../../api/client.js';
 import { useToast } from '../../contexts/ToastContext.js';
-import { DollarSign, X, Calendar, ShoppingBag, FileText, CheckCircle2, AlertTriangle, Building2, User } from 'lucide-react';
+import { DollarSign, X, Calendar, ShoppingBag, FileText, CheckCircle2, AlertTriangle, Building2 } from 'lucide-react';
 
 interface TransactionFormModalProps {
   isOpen: boolean;
@@ -22,8 +22,16 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
   const { showToast } = useToast();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | string>(
-    preselectedCustomer?.id || initialTransaction?.customer_id || ''
+  const [salesUsers, setSalesUsers] = useState<User[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>(
+    preselectedCustomer?.id ? String(preselectedCustomer.id) :
+    initialTransaction?.customer_id ? String(initialTransaction.customer_id) :
+    initialTransaction?.customer_name_manual ? 'manual' : ''
+  );
+  const [manualCustomerName, setManualCustomerName] = useState(initialTransaction?.customer_name_manual || '');
+  const [selectedSalesId, setSelectedSalesId] = useState<string>(
+    preselectedCustomer?.assigned_sales_id ? String(preselectedCustomer.assigned_sales_id) :
+    initialTransaction?.sales_id ? String(initialTransaction.sales_id) : ''
   );
   const [product, setProduct] = useState(initialTransaction?.product || '');
   const [description, setDescription] = useState(initialTransaction?.description || '');
@@ -41,35 +49,56 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (isOpen) {
-      if (initialTransaction) {
-        setSelectedCustomerId(initialTransaction.customer_id);
-        setProduct(initialTransaction.product);
-        setDescription(initialTransaction.description || '');
-        setAmount(String(initialTransaction.amount));
-        setStatus(initialTransaction.status);
-        setTransactionDate(initialTransaction.transaction_date);
-        setNotes(initialTransaction.notes || '');
-      } else if (preselectedCustomer) {
-        setSelectedCustomerId(preselectedCustomer.id);
-        setProduct('');
-        setDescription('');
-        setAmount('');
-        setStatus('CLOSING');
-        setTransactionDate(new Date().toISOString().split('T')[0]);
-        setNotes('');
-      } else {
-        // Fetch customers list for dropdown
-        apiRequest<{ success: boolean; data: Customer[] }>('/customers?limit=100').then(res => {
-          if (res.success) {
-            setCustomers(res.data);
-            if (res.data.length > 0 && !selectedCustomerId) {
-              setSelectedCustomerId(res.data[0].id);
-            }
-          }
-        });
-      }
+    if (!isOpen) return;
+
+    if (initialTransaction) {
+      setSelectedCustomerId(
+        initialTransaction.customer_id ? String(initialTransaction.customer_id) :
+        initialTransaction.customer_name_manual ? 'manual' : ''
+      );
+      setManualCustomerName(initialTransaction.customer_name_manual || '');
+      setSelectedSalesId(initialTransaction.sales_id ? String(initialTransaction.sales_id) : '');
+      setProduct(initialTransaction.product);
+      setDescription(initialTransaction.description || '');
+      setAmount(String(initialTransaction.amount));
+      setStatus(initialTransaction.status);
+      setTransactionDate(initialTransaction.transaction_date);
+      setNotes(initialTransaction.notes || '');
+      return;
     }
+
+    setSelectedCustomerId(preselectedCustomer?.id ? String(preselectedCustomer.id) : '');
+    setManualCustomerName('');
+    setSelectedSalesId(preselectedCustomer?.assigned_sales_id ? String(preselectedCustomer.assigned_sales_id) : '');
+    setProduct('');
+    setDescription('');
+    setAmount('');
+    setStatus('CLOSING');
+    setTransactionDate(new Date().toISOString().split('T')[0]);
+    setNotes('');
+
+    const loadOptions = async () => {
+      try {
+        const requests: Promise<any>[] = [
+          apiRequest<{ success: boolean; data: User[] }>('/users'),
+        ];
+        if (!preselectedCustomer) {
+          requests.push(apiRequest<{ success: boolean; data: Customer[] }>('/customers?limit=100'));
+        }
+        const [usersResponse, customersResponse] = await Promise.all(requests);
+        if (usersResponse.success) {
+          setSalesUsers((usersResponse.data || []).filter((item: User) => item.role === 'SALES' && item.is_active));
+        }
+        if (!preselectedCustomer && customersResponse?.success) {
+          const availableCustomers = customersResponse.data || [];
+          setCustomers(availableCustomers);
+        }
+      } catch (err) {
+        console.error('Gagal memuat opsi customer/Sales untuk transaksi.', err);
+      }
+    };
+
+    loadOptions();
   }, [isOpen, initialTransaction, preselectedCustomer]);
 
   if (!isOpen) return null;
@@ -78,7 +107,17 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     e.preventDefault();
 
     if (!selectedCustomerId) {
-      showToast('Pilih customer terlebih dahulu.', 'error');
+      showToast('Pilih customer terdaftar, nama manual, atau tanpa customer.', 'error');
+      return;
+    }
+
+    if (selectedCustomerId === 'manual' && !manualCustomerName.trim()) {
+      showToast('Nama customer manual wajib diisi.', 'error');
+      return;
+    }
+
+    if (manualCustomerName.trim().length > 120) {
+      showToast('Nama customer maksimal 120 karakter.', 'error');
       return;
     }
 
@@ -123,7 +162,9 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
           {
             method: 'POST',
             body: JSON.stringify({
-              customer_id: selectedCustomerId,
+              customer_id: selectedCustomerId !== 'manual' && selectedCustomerId !== 'none' ? Number(selectedCustomerId) : null,
+              customer_name_manual: selectedCustomerId === 'manual' ? manualCustomerName.trim() : null,
+              sales_id: selectedSalesId ? Number(selectedSalesId) : null,
               product: product.trim(),
               description: description.trim(),
               amount: numericAmount,
@@ -194,28 +235,68 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
             ) : initialTransaction ? (
               <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-xl">
                 <div className="text-xs font-bold text-neutral-900">
-                  {initialTransaction.customer_name || `Customer #${initialTransaction.customer_id}`}
+                  {initialTransaction.customer_name || initialTransaction.customer_name_manual || 'Tanpa Customer'}
                 </div>
                 <div className="text-[11px] text-neutral-500">
                   {initialTransaction.company_name || '-'}
                 </div>
               </div>
             ) : (
-              <select
-                value={selectedCustomerId}
-                onChange={e => setSelectedCustomerId(e.target.value)}
-                required
-                className="w-full min-h-[44px] px-3.5 py-2 text-xs border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059] bg-white font-medium"
-              >
-                <option value="">-- Pilih Customer --</option>
-                {customers.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} {c.company_name ? `(${c.company_name})` : ''} - {c.customer_code}
-                  </option>
-                ))}
-              </select>
+              <>
+                <select
+                  value={selectedCustomerId}
+                  onChange={e => {
+                    const value = e.target.value;
+                    setSelectedCustomerId(value);
+                    if (value === 'manual' || value === 'none' || !value) {
+                      setSelectedSalesId('');
+                    } else {
+                      const customer = customers.find(item => item.id === Number(value));
+                      setSelectedSalesId(customer?.assigned_sales_id ? String(customer.assigned_sales_id) : '');
+                    }
+                  }}
+                  required
+                  className="w-full min-h-[44px] px-3.5 py-2 text-xs border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059] bg-white font-medium"
+                >
+                  <option value="">-- Pilih Opsi Customer --</option>
+                  <option value="none">-- Tanpa Customer --</option>
+                  <option value="manual">-- Gunakan Nama Customer Manual --</option>
+                  {customers.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.company_name ? `(${c.company_name})` : ''} - {c.customer_code}
+                    </option>
+                  ))}
+                </select>
+                {selectedCustomerId === 'manual' && (
+                  <input
+                    type="text"
+                    required
+                    maxLength={120}
+                    value={manualCustomerName}
+                    onChange={e => setManualCustomerName(e.target.value)}
+                    placeholder="Masukkan nama customer"
+                    className="w-full min-h-[44px] mt-2 px-3.5 py-2 text-xs border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059] bg-white"
+                  />
+                )}
+              </>
             )}
           </div>
+
+          {!initialTransaction && (
+            <div>
+              <label className="block text-xs font-semibold text-neutral-700 mb-1">Sales PIC (Opsional)</label>
+              <select
+                value={selectedSalesId}
+                onChange={e => setSelectedSalesId(e.target.value)}
+                className="w-full min-h-[44px] px-3.5 py-2 text-xs border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#c5a059]/30 focus:border-[#c5a059] bg-white font-medium"
+              >
+                <option value="">-- Tanpa Sales PIC --</option>
+                {salesUsers.map(sales => (
+                  <option key={sales.id} value={sales.id}>{sales.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Status Selection (Closing vs Cancel) */}
           <div>
@@ -344,7 +425,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
             />
           </div>
 
-          {!initialTransaction && status === 'CLOSING' && (
+          {!initialTransaction && selectedCustomerId !== '' && selectedCustomerId !== 'manual' && selectedCustomerId !== 'none' && status === 'CLOSING' && (
             <label className="flex items-center gap-2 p-3 bg-neutral-50 border border-neutral-200 rounded-xl cursor-pointer">
               <input
                 type="checkbox"

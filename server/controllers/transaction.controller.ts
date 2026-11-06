@@ -98,9 +98,10 @@ export async function getTransactions(req: AuthenticatedRequest, res: Response):
         LOWER(t.product) LIKE ? OR
         LOWER(COALESCE(t.description, '')) LIKE ? OR
         LOWER(COALESCE(c.name, '')) LIKE ? OR
+        LOWER(COALESCE(t.customer_name_manual, '')) LIKE ? OR
         LOWER(COALESCE(c.company_name, '')) LIKE ?
       )`);
-      params.push(q, q, q, q);
+      params.push(q, q, q, q, q);
     }
 
     const whereClause = conditions.join(' AND ');
@@ -108,10 +109,10 @@ export async function getTransactions(req: AuthenticatedRequest, res: Response):
     const sql = `
       SELECT 
         t.*,
-        COALESCE(c.name, 'Customer Terhapus') AS customer_name,
+        COALESCE(NULLIF(t.customer_name_manual, ''), c.name, CASE WHEN t.customer_id IS NULL THEN 'Tanpa Customer' ELSE 'Customer Terhapus' END) AS customer_name,
         COALESCE(c.company_name, '-') AS company_name,
         COALESCE(c.whatsapp_number, '-') AS whatsapp_number,
-        COALESCE(u.name, 'Sales Staff') AS sales_name
+        COALESCE(u.name, '-') AS sales_name
       FROM transactions t
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN users u ON t.sales_id = u.id
@@ -153,6 +154,8 @@ export async function getTransactions(req: AuthenticatedRequest, res: Response):
 export async function createTransaction(req: AuthenticatedRequest, res: Response): Promise<void> {
   const {
     customer_id,
+    customer_name_manual,
+    sales_id,
     product,
     description,
     amount,
@@ -162,8 +165,8 @@ export async function createTransaction(req: AuthenticatedRequest, res: Response
     update_customer_status = true,
   } = req.body;
 
-  if (!customer_id || !product || amount === undefined) {
-    res.status(400).json({ success: false, message: 'Customer, nama produk, dan nominal transaksi wajib diisi.' });
+  if (typeof product !== 'string' || !product.trim() || amount === undefined) {
+    res.status(400).json({ success: false, message: 'Nama produk dan nominal transaksi wajib diisi.' });
     return;
   }
 
@@ -186,19 +189,59 @@ export async function createTransaction(req: AuthenticatedRequest, res: Response
     }
   }
 
-  try {
-    const custId = parseInt(customer_id, 10);
-    const [cRows] = await pool.query<any[]>('SELECT * FROM customers WHERE id = ? LIMIT 1', [custId]);
+  const manualCustomerName = typeof customer_name_manual === 'string' ? customer_name_manual.trim() : '';
+  if (manualCustomerName.length > 120) {
+    res.status(400).json({ success: false, message: 'Nama customer manual maksimal 120 karakter.' });
+    return;
+  }
 
-    if (!cRows || cRows.length === 0) {
-      res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
-      return;
+  try {
+    let customer: any = null;
+    let finalCustomerId: number | null = null;
+
+    if (customer_id !== undefined && customer_id !== null && String(customer_id).trim() !== '') {
+      const parsedCustomerId = Number(customer_id);
+      if (!Number.isInteger(parsedCustomerId) || parsedCustomerId <= 0) {
+        res.status(400).json({ success: false, message: 'Customer yang dipilih tidak valid.' });
+        return;
+      }
+
+      const [cRows] = await pool.query<any[]>('SELECT * FROM customers WHERE id = ? LIMIT 1', [parsedCustomerId]);
+      if (!cRows || cRows.length === 0) {
+        res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
+        return;
+      }
+      customer = cRows[0];
+      finalCustomerId = customer.id;
     }
 
-    const customer = cRows[0];
+    // Keep legacy API clients compatible: when sales_id is omitted for a registered
+    // customer, retain the customer's assigned Sales. An explicit null means no PIC.
+    let finalSalesId: number | null = customer?.assigned_sales_id ?? null;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'sales_id')) {
+      if (sales_id === null || sales_id === undefined || String(sales_id).trim() === '') {
+        finalSalesId = null;
+      } else {
+        const parsedSalesId = Number(sales_id);
+        if (!Number.isInteger(parsedSalesId) || parsedSalesId <= 0) {
+          res.status(400).json({ success: false, message: 'Sales PIC yang dipilih tidak valid.' });
+          return;
+        }
+        const [salesRows] = await pool.query<any[]>(
+          "SELECT id FROM users WHERE id = ? AND role = 'SALES' LIMIT 1",
+          [parsedSalesId]
+        );
+        if (!salesRows || salesRows.length === 0) {
+          res.status(404).json({ success: false, message: 'Sales PIC tidak ditemukan.' });
+          return;
+        }
+        finalSalesId = salesRows[0].id;
+      }
+    }
 
-    // Security Check: Sales can ONLY record transaction for their own customer
-    if (req.user?.role === 'SALES' && customer.assigned_sales_id !== req.user.id) {
+    // Defense in depth. The route already requires Admin; preserve the ownership
+    // check in case this controller is reused by another route in the future.
+    if (req.user?.role === 'SALES' && customer && customer.assigned_sales_id !== req.user.id) {
       res.status(403).json({ success: false, message: 'Akses ditolak: Customer bukan milik Anda.' });
       return;
     }
@@ -206,28 +249,30 @@ export async function createTransaction(req: AuthenticatedRequest, res: Response
     const today = new Date().toISOString().split('T')[0];
     const finalDate = transaction_date ? String(transaction_date).trim() : today;
     const finalStatus = status || 'CLOSING';
+    const finalManualCustomerName = finalCustomerId === null && manualCustomerName ? manualCustomerName : null;
 
     const result = await withTransaction(async (conn) => {
       const [insertRes] = await conn.execute<any>(
         `INSERT INTO transactions (
-          customer_id, sales_id, transaction_date, product, description,
+          customer_id, customer_name_manual, sales_id, transaction_date, product, description,
           amount, status, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
-          customer.id,
-          customer.assigned_sales_id,
+          finalCustomerId,
+          finalManualCustomerName,
+          finalSalesId,
           finalDate,
           product.trim(),
-          description ? description.trim() : '',
+          description ? String(description).trim() : '',
           numericAmount,
           finalStatus,
-          notes ? notes.trim() : '',
+          notes ? String(notes).trim() : '',
         ]
       );
 
       const trxId = insertRes.insertId;
 
-      if (update_customer_status) {
+      if (update_customer_status && customer) {
         const [statusRows] = await conn.query<any[]>(
           'SELECT id FROM customer_statuses WHERE code = ? LIMIT 1',
           [finalStatus]
@@ -251,7 +296,9 @@ export async function createTransaction(req: AuthenticatedRequest, res: Response
       entityId: result.trxId,
       newData: {
         id: result.trxId,
-        customer_id: customer.id,
+        customer_id: finalCustomerId,
+        customer_name_manual: finalManualCustomerName,
+        sales_id: finalSalesId,
         amount: numericAmount,
         status: finalStatus,
         product: product.trim(),

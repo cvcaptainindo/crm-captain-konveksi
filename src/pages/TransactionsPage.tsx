@@ -481,6 +481,9 @@ export const TransactionsPage: React.FC = () => {
                         />
                         {isClosing ? 'Closing Deal' : 'Cancel'}
                       </span>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-neutral-200 bg-white text-neutral-500">
+                        {t.invoice_id ? 'Invoice' : 'Manual'}
+                      </span>
                     </div>
 
                     <h3 className="text-sm font-bold text-neutral-900 mt-1">{t.product}</h3>
@@ -505,13 +508,13 @@ export const TransactionsPage: React.FC = () => {
                 <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-100 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   <div>
                     <div className="text-[10px] text-neutral-400 uppercase font-semibold">Customer</div>
-                    <div className="font-bold text-neutral-800">{t.customer_name}</div>
+                    <div className="font-bold text-neutral-800">{t.customer_name || t.customer_name_manual || 'Tanpa Customer'}</div>
                     <div className="text-[11px] text-neutral-500">{t.company_name || '-'}</div>
                   </div>
 
                   <div>
                     <div className="text-[10px] text-neutral-400 uppercase font-semibold">Sales PIC</div>
-                    <div className="font-semibold text-neutral-800">{t.sales_name}</div>
+                    <div className="font-semibold text-neutral-800">{t.sales_name || '-'}</div>
                     {t.notes && (
                       <div className="text-[11px] text-neutral-500 italic mt-0.5">"{t.notes}"</div>
                     )}
@@ -520,7 +523,7 @@ export const TransactionsPage: React.FC = () => {
 
                 {/* Card Actions */}
                 <div className="flex items-center justify-end gap-2 pt-1 border-t border-neutral-100">
-                  {!t.invoice_id && (
+                  {isAdmin && !t.invoice_id && (
                     <button
                       type="button"
                       onClick={() => {

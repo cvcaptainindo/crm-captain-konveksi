@@ -9,6 +9,8 @@ import { calculateDaysSinceContact, determineFollowUpCategory } from './followUp
  */
 export function sanitizeSpreadsheetCell(value: any): any {
   if (typeof value !== 'string') return value;
+  // A lone dash is a display placeholder, not a spreadsheet formula.
+  if (value === '-') return value;
   // Detect formula injection triggers (=, +, -, @, tab, CR) even if preceded by whitespace
   if (/^[\s]*[=+\-@\t\r]/.test(value)) {
     return `'${value}`;
@@ -129,9 +131,10 @@ export function generateTransactionExport(
   const rows = transactions.map(t => ({
     'ID Transaksi': t.id,
     'Tanggal Transaksi': t.transaction_date,
-    'Nama Customer': sanitizeSpreadsheetCell(t.customer_name || customerMap.get(t.customer_id) || `Customer #${t.customer_id}`),
+    'Nama Customer': sanitizeSpreadsheetCell(t.customer_name || t.customer_name_manual || (t.customer_id ? customerMap.get(t.customer_id) || `Customer #${t.customer_id}` : 'Tanpa Customer')),
     'Perusahaan': sanitizeSpreadsheetCell(t.company_name || companyMap.get(t.customer_id) || '-'),
-    'Sales PIC': sanitizeSpreadsheetCell(t.sales_name || userMap.get(t.sales_id) || `Sales #${t.sales_id}`),
+    'Sales PIC': sanitizeSpreadsheetCell(t.sales_name || (t.sales_id ? userMap.get(t.sales_id) || `Sales #${t.sales_id}` : '-')),
+    'Sumber Omzet': t.invoice_id ? 'Invoice' : 'Manual',
     'Nama Produk / Pesanan': sanitizeSpreadsheetCell(t.product),
     'Deskripsi': sanitizeSpreadsheetCell(t.description || '-'),
     'Nominal Transaksi (Rp)': Number(t.amount) || 0,

@@ -150,8 +150,9 @@ CREATE TABLE IF NOT EXISTS `follow_up_activities` (
 -- 1.8 TABEL: transactions (Pencatatan Omzet Closing & Status Transaksi)
 CREATE TABLE IF NOT EXISTS `transactions` (
   `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `customer_id` INT UNSIGNED NOT NULL,
-  `sales_id` INT UNSIGNED NOT NULL,
+  `customer_id` INT UNSIGNED NULL,
+  `customer_name_manual` VARCHAR(120) NULL,
+  `sales_id` INT UNSIGNED NULL,
   `transaction_date` DATE NOT NULL,
   `product` VARCHAR(150) NOT NULL,
   `description` TEXT NULL,

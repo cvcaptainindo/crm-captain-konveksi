@@ -1082,7 +1082,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                               >
                                 Rp {Number(trx.amount).toLocaleString('id-ID')}
                               </div>
-                              {!trx.invoice_id && (
+                              {isAdmin && !trx.invoice_id && (
                                 <button
                                   type="button"
                                   onClick={() => {

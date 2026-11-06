@@ -135,8 +135,9 @@ CREATE TABLE IF NOT EXISTS follow_up_activities (
 -- 8. TRANSACTIONS / CLOSINGS (Omzet Tracking - Multiple Closings per Customer)
 CREATE TABLE IF NOT EXISTS transactions (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  customer_id INT UNSIGNED NOT NULL,
-  sales_id INT UNSIGNED NOT NULL,
+  customer_id INT UNSIGNED NULL,
+  customer_name_manual VARCHAR(120) NULL,
+  sales_id INT UNSIGNED NULL,
   transaction_date DATE NOT NULL,
   product VARCHAR(150) NOT NULL,
   description TEXT NULL,

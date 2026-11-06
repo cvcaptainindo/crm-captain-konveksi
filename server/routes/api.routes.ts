@@ -87,7 +87,7 @@ apiRouter.post('/sales-documents/:id/payments', authMiddleware, docCtrl.recordPa
 apiRouter.get('/transactions/overview', authMiddleware, trxCtrl.getOmzetOverview);
 apiRouter.get('/transactions', authMiddleware, trxCtrl.getTransactions);
 apiRouter.post('/transactions', authMiddleware, requireAdmin, trxCtrl.createTransaction);
-apiRouter.put('/transactions/:id', authMiddleware, trxCtrl.updateTransaction);
+apiRouter.put('/transactions/:id', authMiddleware, requireAdmin, trxCtrl.updateTransaction);
 apiRouter.delete('/transactions/:id', authMiddleware, requireAdmin, trxCtrl.deleteTransaction);
 
 // ========================================================

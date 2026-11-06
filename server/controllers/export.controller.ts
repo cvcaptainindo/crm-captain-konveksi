@@ -195,9 +195,10 @@ export async function exportTransactions(req: AuthenticatedRequest, res: Respons
         LOWER(t.product) LIKE ? OR
         LOWER(COALESCE(t.description, '')) LIKE ? OR
         LOWER(COALESCE(c.name, '')) LIKE ? OR
+        LOWER(COALESCE(t.customer_name_manual, '')) LIKE ? OR
         LOWER(COALESCE(c.company_name, '')) LIKE ?
       )`);
-      params.push(q, q, q, q);
+      params.push(q, q, q, q, q);
     }
 
     const whereClause = conditions.join(' AND ');
@@ -205,8 +206,9 @@ export async function exportTransactions(req: AuthenticatedRequest, res: Respons
     const sql = `
       SELECT 
         t.*,
-        c.name AS customer_name, c.company_name AS company_name,
-        u.name AS sales_name
+        COALESCE(NULLIF(t.customer_name_manual, ''), c.name, CASE WHEN t.customer_id IS NULL THEN 'Tanpa Customer' ELSE 'Customer Terhapus' END) AS customer_name,
+        c.company_name AS company_name,
+        COALESCE(u.name, '-') AS sales_name
       FROM transactions t
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN users u ON t.sales_id = u.id
