@@ -584,8 +584,8 @@ export async function getOmzetOverview(req: AuthenticatedRequest, res: Response)
     );
 
     const documentSalesFilter = isSales
-      ? ' AND c.assigned_sales_id = ?'
-      : selectedSalesId ? ' AND c.assigned_sales_id = ?' : '';
+      ? ' AND d.sales_id = ?'
+      : selectedSalesId ? ' AND d.sales_id = ?' : '';
     const documentSalesParams = isSales ? [req.user!.id] : selectedSalesId ? [selectedSalesId] : [];
 
     // Aggregate payments and completed refunds independently to avoid multiplying

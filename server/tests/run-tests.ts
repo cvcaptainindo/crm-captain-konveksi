@@ -113,6 +113,14 @@ async function runTestSuite() {
     assert.strictEqual(routes.includes("apiRouter.get('/sales-documents/customer/:customerId', authMiddleware, docCtrl.getDocumentsByCustomer)"), true);
   });
 
+  await runTest('Invoice cancellation routes expose both documents and sales-documents aliases with the same authenticated handler', () => {
+    const routes = fs.readFileSync(path.resolve(process.cwd(), 'server/routes/api.routes.ts'), 'utf-8');
+    assert.strictEqual(routes.includes("apiRouter.post('/documents/:id/cancel', authMiddleware, docCtrl.cancelInvoice)"), true,
+      'The original documents cancellation endpoint must remain registered');
+    assert.strictEqual(routes.includes("apiRouter.post('/sales-documents/:id/cancel', authMiddleware, docCtrl.cancelInvoice)"), true,
+      'The sales-documents cancellation alias must use the same authenticated handler');
+  });
+
   await runTest('PR-02 SQL migration is additive and contains invoice metadata relation', () => {
     const migration = fs.readFileSync(path.resolve(process.cwd(), 'server/database/migration_invoice_metadata.sql'), 'utf-8');
     assert.strictEqual(migration.includes('ADD COLUMN invoice_type'), true);
@@ -766,6 +774,39 @@ async function runTestSuite() {
     assert.strictEqual(closings.length, 3, 'Closing count must be 3');
     assert.strictEqual(cancelAmount, 5000000, 'Cancel amount must be 5.000.000');
     assert.strictEqual(cancels.length, 1, 'Cancel count must be 1');
+  });
+
+  await runTest('FIX-02: Invoice payments, refunds, and receivables follow invoice Sales attribution', () => {
+    const controllerSource = fs.readFileSync(
+      path.resolve(process.cwd(), 'server/controllers/transaction.controller.ts'),
+      'utf-8'
+    );
+
+    const filterStart = controllerSource.indexOf('const documentSalesFilter = isSales');
+    const filterEnd = controllerSource.indexOf('// Aggregate payments and completed refunds', filterStart);
+
+    assert.ok(filterStart >= 0 && filterEnd > filterStart, 'Document Sales filter must exist');
+
+    const filterBlock = controllerSource.slice(filterStart, filterEnd);
+
+    assert.strictEqual(
+      (filterBlock.match(/AND d\.sales_id = \?/g) || []).length,
+      2,
+      'Admin and Sales filters must both use sales_documents.sales_id'
+    );
+
+    assert.strictEqual(
+      filterBlock.includes('c.assigned_sales_id'),
+      false,
+      'Financial document attribution must not follow current customer assignment'
+    );
+
+    const financialQueries = controllerSource.slice(filterEnd);
+    assert.strictEqual(
+      (financialQueries.match(/\$\{documentSalesFilter\}/g) || []).length >= 3,
+      true,
+      'Payment, refund, and receivable queries must use the same document Sales filter'
+    );
   });
 
   await runTest('Permanent deletion policy blocks deletion of customers with transactions', () => {
