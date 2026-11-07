@@ -250,7 +250,6 @@ const MainApp: React.FC = () => {
       <CustomerDetailModal
         isOpen={isDetailModalOpen}
         customerId={detailCustomerId}
-        statuses={statuses}
         onClose={() => setIsDetailModalOpen(false)}
         onOpenFollowUp={c => {
           setIsDetailModalOpen(false);
