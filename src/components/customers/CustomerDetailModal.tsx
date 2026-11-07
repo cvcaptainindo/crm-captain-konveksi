@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Customer, Transaction, SalesDocument, DocType } from '../../types/index.js';
+import { Customer, Transaction, SalesDocument, SalesDocumentRefund, DocType } from '../../types/index.js';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { useToast } from '../../contexts/ToastContext.js';
 import { apiRequest } from '../../api/client.js';
@@ -37,6 +37,8 @@ import {
   Shield,
   Eye,
   Check,
+  RotateCcw,
+  Clock3,
 } from 'lucide-react';
 
 interface CustomerDetailModalProps {
@@ -84,6 +86,17 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
   const [paymentDoc, setPaymentDoc] = useState<SalesDocument | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
 
+  // Refund state — terpisah dari pembayaran dan omzet
+  const [refundsByInvoice, setRefundsByInvoice] = useState<Record<number, SalesDocumentRefund[]>>({});
+  const [refundInvoice, setRefundInvoice] = useState<SalesDocument | null>(null);
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundDate, setRefundDate] = useState('');
+  const [refundMethod, setRefundMethod] = useState('TRANSFER');
+  const [refundReference, setRefundReference] = useState('');
+  const [refundNotes, setRefundNotes] = useState('');
+  const [refundStatus, setRefundStatus] = useState<'PENDING' | 'COMPLETED'>('PENDING');
+  const [isRefundProcessing, setIsRefundProcessing] = useState(false);
+
   // Keterangan Quick Edit state
   const [editingKeteranganDoc, setEditingKeteranganDoc] = useState<SalesDocument | null>(null);
   const [keteranganVal, setKeteranganVal] = useState('');
@@ -111,7 +124,24 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
       try {
         const docRes = await apiRequest(`/documents/customer/${id}`);
         if (docRes.success && docRes.data) {
-          setDocuments(docRes.data);
+          const rows = docRes.data as SalesDocument[];
+          setDocuments(rows);
+
+          const invoiceRows = rows.filter(item => item.doc_type === 'INVOICE');
+          const refundResults = await Promise.all(invoiceRows.map(async invoice => {
+            try {
+              const refundRes = await apiRequest(`/documents/${invoice.id}/refunds`);
+              return [invoice.id, Array.isArray(refundRes?.data)
+                ? refundRes.data as SalesDocumentRefund[]
+                : []] as const;
+            } catch {
+              return [invoice.id, []] as const;
+            }
+          }));
+
+          setRefundsByInvoice(
+            Object.fromEntries(refundResults) as Record<number, SalesDocumentRefund[]>
+          );
         }
       } catch {
         // Fallback to customer.documents
@@ -121,6 +151,109 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
       onClose();
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const openRefund = (invoice: SalesDocument) => {
+    const paid = Number(invoice.paid_amount) || 0;
+    setRefundInvoice(invoice);
+    setRefundAmount(String(paid));
+    setRefundStatus('PENDING');
+    setRefundDate(new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10));
+    setRefundMethod('TRANSFER');
+    setRefundReference('');
+    setRefundNotes('');
+  };
+
+  const handleSubmitRefund = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!refundInvoice) return;
+
+    const amount = Number(refundAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast('Nominal refund harus lebih dari 0.', 'error');
+      return;
+    }
+
+    if (refundStatus === 'COMPLETED' && !refundDate) {
+      showToast('Tanggal refund wajib diisi.', 'error');
+      return;
+    }
+
+    setIsRefundProcessing(true);
+    try {
+      const res = await apiRequest(`/documents/${refundInvoice.id}/refunds`, {
+        method: 'POST',
+        body: JSON.stringify({
+          amount,
+          status: refundStatus,
+          refund_date: refundStatus === 'COMPLETED' ? refundDate : null,
+          refund_method: refundStatus === 'COMPLETED' ? refundMethod : null,
+          reference_number: refundReference.trim() || null,
+          notes: refundNotes.trim() || null,
+        }),
+      });
+
+      if (!res?.success) {
+        throw new Error(res?.message || 'Refund gagal disimpan.');
+      }
+
+      showToast(res.message || 'Catatan refund berhasil disimpan.', 'success');
+      setRefundInvoice(null);
+
+      if (customer) await loadDetails(customer.id);
+      if (onReloadParent) onReloadParent();
+    } catch (err: any) {
+      showToast(err.message || 'Gagal menyimpan refund.', 'error');
+    } finally {
+      setIsRefundProcessing(false);
+    }
+  };
+
+  const handleCompleteRefund = async (
+    invoice: SalesDocument,
+    refund: SalesDocumentRefund
+  ) => {
+    const date = window.prompt(
+      'Tanggal refund (YYYY-MM-DD):',
+      new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    );
+    if (!date) return;
+
+    const method = window.prompt('Metode refund (TRANSFER/CASH/QRIS/OTHER):', 'TRANSFER');
+    if (!method) return;
+
+    const normalizedMethod = method.trim().toUpperCase();
+    if (!['TRANSFER', 'CASH', 'QRIS', 'OTHER'].includes(normalizedMethod)) {
+      showToast('Metode refund tidak valid.', 'error');
+      return;
+    }
+
+    setIsRefundProcessing(true);
+    try {
+      const res = await apiRequest(
+        `/documents/${invoice.id}/refunds/${refund.id}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status: 'COMPLETED',
+            refund_date: date,
+            refund_method: normalizedMethod,
+          }),
+        }
+      );
+
+      if (!res?.success) {
+        throw new Error(res?.message || 'Status refund gagal diperbarui.');
+      }
+
+      showToast(res.message || 'Refund ditandai selesai.', 'success');
+      if (customer) await loadDetails(customer.id);
+      if (onReloadParent) onReloadParent();
+    } catch (err: any) {
+      showToast(err.message || 'Gagal memperbarui refund.', 'error');
+    } finally {
+      setIsRefundProcessing(false);
     }
   };
 
@@ -146,6 +279,13 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
   // Can this user manage documents for this customer?
   // Only the assigned sales (non-admin) can create or modify documents
   const isAssignedSales = !isAdmin && customer?.assigned_sales_id === user?.id;
+
+  // Refund hanya dapat dikelola oleh Sales penanggung jawab customer
+  const canManageRefund =
+    !isAdmin &&
+    user?.role === 'SALES' &&
+    Number(customer?.assigned_sales_id) === Number(user?.id);
+
 
   // Handler: Open Add Document Modal
   const handleOpenAddDoc = (type: DocType) => {
@@ -995,6 +1135,87 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                               )}
                             </div>
 
+                            {/* Refund — hanya untuk invoice batal yang sudah dibayar */}
+                            {(['CANCELLED', 'CANCEL'].includes(inv.status)) &&
+                              Number(inv.paid_amount || 0) > 0 && (
+                              <div className="pt-2 border-t border-neutral-100 space-y-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="text-[11px] font-bold text-neutral-700">
+                                    Refund — terpisah dari riwayat pembayaran dan omzet
+                                  </div>
+                                  {canManageRefund && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openRefund(inv)}
+                                      className="px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-800 border border-violet-200 rounded-lg text-[11px] font-bold inline-flex items-center gap-1.5"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5" />
+                                      Catat Refund
+                                    </button>
+                                  )}
+                                </div>
+
+                                {(() => {
+                                  const refunds = refundsByInvoice[inv.id] || [];
+                                  const pending = refunds.filter(item => item.status === 'PENDING');
+
+                                  if (refunds.length === 0) {
+                                    return (
+                                      <div className="text-[10px] text-amber-700 flex items-center gap-1">
+                                        <AlertCircle className="w-3 h-3" />
+                                        Belum ada catatan refund.
+                                      </div>
+                                    );
+                                  }
+
+                                  return (
+                                    <div className="space-y-1.5">
+                                      {refunds.map(refund => (
+                                        <div
+                                          key={refund.id}
+                                          className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-neutral-50 border border-neutral-100 px-2.5 py-2 text-[10px]"
+                                        >
+                                          <div className="space-y-0.5">
+                                            <div className="font-bold text-neutral-800">
+                                              Rp {Number(refund.amount).toLocaleString('id-ID')}
+                                              {' • '}
+                                              {refund.status === 'COMPLETED' ? 'Selesai' : 'Menunggu refund'}
+                                            </div>
+                                            <div className="text-neutral-500">
+                                              {refund.refund_date || 'Tanggal belum dicatat'}
+                                              {refund.refund_method ? ` • ${refund.refund_method}` : ''}
+                                              {refund.reference_number ? ` • Ref: ${refund.reference_number}` : ''}
+                                            </div>
+                                            {refund.notes && (
+                                              <div className="text-neutral-500">{refund.notes}</div>
+                                            )}
+                                          </div>
+
+                                          {canManageRefund && refund.status === 'PENDING' && (
+                                            <button
+                                              type="button"
+                                              disabled={isRefundProcessing}
+                                              onClick={() => handleCompleteRefund(inv, refund)}
+                                              className="text-violet-700 hover:text-violet-900 font-bold underline disabled:opacity-50"
+                                            >
+                                              Tandai selesai
+                                            </button>
+                                          )}
+                                        </div>
+                                      ))}
+
+                                      {pending.length > 0 && (
+                                        <div className="text-[10px] text-amber-700 flex items-center gap-1">
+                                          <Clock3 className="w-3 h-3" />
+                                          {pending.length} refund menunggu penyelesaian.
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            )}
+
                           </div>
                         ))}
                       </div>
@@ -1391,6 +1612,145 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Refund Form Modal */}
+      {refundInvoice && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-neutral-950/70 backdrop-blur-xs">
+          <form
+            onSubmit={handleSubmitRefund}
+            className="w-full max-w-md bg-white rounded-2xl p-5 shadow-2xl border border-neutral-200 space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-neutral-900">Catat Refund Invoice</h3>
+                <p className="text-xs text-neutral-500 font-mono">
+                  Invoice #{refundInvoice.doc_number}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRefundInvoice(null)}
+                disabled={isRefundProcessing}
+                className="p-1 text-neutral-400 hover:text-neutral-700 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[11px] font-semibold text-neutral-700 mb-1">
+                  Nominal Refund (Rp)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  required
+                  value={refundAmount}
+                  onChange={e => setRefundAmount(e.target.value)}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-sm font-mono"
+                  placeholder="Masukkan nominal refund"
+                />
+                <p className="text-[10px] text-neutral-500 mt-1">
+                  Pembatasan nominal tetap divalidasi oleh backend berdasarkan pembayaran dan refund sebelumnya.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-neutral-700 mb-1">
+                  Status Refund
+                </label>
+                <select
+                  value={refundStatus}
+                  onChange={e => setRefundStatus(e.target.value as 'PENDING' | 'COMPLETED')}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-lg bg-white"
+                >
+                  <option value="PENDING">Menunggu Refund</option>
+                  <option value="COMPLETED">Sudah Dikembalikan</option>
+                </select>
+              </div>
+
+              {refundStatus === 'COMPLETED' && (
+                <>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-neutral-700 mb-1">
+                      Tanggal Refund
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={refundDate}
+                      onChange={e => setRefundDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-neutral-300 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-neutral-700 mb-1">
+                      Metode Refund
+                    </label>
+                    <select
+                      value={refundMethod}
+                      onChange={e => setRefundMethod(e.target.value)}
+                      className="w-full px-3 py-2 border border-neutral-300 rounded-lg bg-white"
+                    >
+                      <option value="TRANSFER">TRANSFER</option>
+                      <option value="CASH">CASH</option>
+                      <option value="QRIS">QRIS</option>
+                      <option value="OTHER">OTHER</option>
+                    </select>
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="block text-[11px] font-semibold text-neutral-700 mb-1">
+                  Nomor Referensi (opsional)
+                </label>
+                <input
+                  type="text"
+                  value={refundReference}
+                  onChange={e => setRefundReference(e.target.value)}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-lg"
+                  placeholder="Nomor bukti transfer / referensi"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-neutral-700 mb-1">
+                  Catatan (opsional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={refundNotes}
+                  onChange={e => setRefundNotes(e.target.value)}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-lg resize-y"
+                  placeholder="Catatan refund..."
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => setRefundInvoice(null)}
+                disabled={isRefundProcessing}
+                className="px-3.5 py-2 text-xs font-semibold text-neutral-700 bg-white border border-neutral-300 rounded-xl"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={isRefundProcessing || !refundAmount || Number(refundAmount) <= 0}
+                className="px-4 py-2 text-xs font-bold text-white bg-violet-700 hover:bg-violet-800 rounded-xl disabled:opacity-50"
+              >
+                {isRefundProcessing ? 'Menyimpan...' : 'Simpan Refund'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
