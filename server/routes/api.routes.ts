@@ -72,6 +72,7 @@ apiRouter.patch('/documents/:id/refunds/:refundId', authMiddleware, docCtrl.comp
 apiRouter.patch('/documents/:id/keterangan', authMiddleware, docCtrl.updateInvoiceKeterangan);
 apiRouter.post('/documents/:id/close', authMiddleware, docCtrl.closeInvoice);
 apiRouter.post('/documents/:id/cancel', authMiddleware, docCtrl.cancelInvoice);
+apiRouter.post('/sales-documents/:id/cancel', authMiddleware, docCtrl.cancelInvoice);
 apiRouter.get('/documents', authMiddleware, docCtrl.getDocuments);
 apiRouter.post('/documents', authMiddleware, docCtrl.createDocument);
 apiRouter.get('/documents/:id', authMiddleware, docCtrl.getDocumentById);

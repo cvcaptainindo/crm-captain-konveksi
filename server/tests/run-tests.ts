@@ -113,6 +113,14 @@ async function runTestSuite() {
     assert.strictEqual(routes.includes("apiRouter.get('/sales-documents/customer/:customerId', authMiddleware, docCtrl.getDocumentsByCustomer)"), true);
   });
 
+  await runTest('Invoice cancellation routes expose both documents and sales-documents aliases with the same authenticated handler', () => {
+    const routes = fs.readFileSync(path.resolve(process.cwd(), 'server/routes/api.routes.ts'), 'utf-8');
+    assert.strictEqual(routes.includes("apiRouter.post('/documents/:id/cancel', authMiddleware, docCtrl.cancelInvoice)"), true,
+      'The original documents cancellation endpoint must remain registered');
+    assert.strictEqual(routes.includes("apiRouter.post('/sales-documents/:id/cancel', authMiddleware, docCtrl.cancelInvoice)"), true,
+      'The sales-documents cancellation alias must use the same authenticated handler');
+  });
+
   await runTest('PR-02 SQL migration is additive and contains invoice metadata relation', () => {
     const migration = fs.readFileSync(path.resolve(process.cwd(), 'server/database/migration_invoice_metadata.sql'), 'utf-8');
     assert.strictEqual(migration.includes('ADD COLUMN invoice_type'), true);
