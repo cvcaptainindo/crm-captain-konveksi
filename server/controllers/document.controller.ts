@@ -1593,6 +1593,13 @@ export async function cancelInvoice(req: AuthenticatedRequest, res: Response): P
       message: `Invoice #${result.doc_number} dibatalkan. Riwayat pembayaran tetap tersimpan; refund harus dicatat secara terpisah.`,
     });
   } catch (err: any) {
+    console.error('[CANCEL_INVOICE_ERROR]', {
+      invoiceId: docId,
+      code: err.code || null,
+      sqlState: err.sqlState || null,
+      sqlMessage: err.sqlMessage || null,
+      message: err.message || 'Unknown error',
+    });
     const status = err.statusCode || 500;
     res.status(status).json({ success: false, message: err.message || 'Gagal membatalkan invoice.' });
   }
