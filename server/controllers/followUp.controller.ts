@@ -206,7 +206,7 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
 
   try {
     const custId = parseInt(customer_id, 10);
-    const [cRows] = await pool.query<any[]>('SELECT * FROM customers WHERE id = ? LIMIT 1', [custId]);
+    const [cRows] = await pool.query<any[]>('SELECT * FROM customers WHERE id = ? AND deleted_at IS NULL LIMIT 1', [custId]);
 
     if (!cRows || cRows.length === 0) {
       res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
@@ -238,6 +238,18 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
 
 
     const result = await withTransaction(async (conn) => {
+      // Lock the active customer row so a concurrent soft-delete is serialized
+      // with this transaction. If it is already in Trash, roll back everything.
+      const [activeRows] = await conn.execute<any[]>(
+        'SELECT id FROM customers WHERE id = ? AND deleted_at IS NULL LIMIT 1 FOR UPDATE',
+        [customer.id]
+      );
+      if (!activeRows || activeRows.length === 0) {
+        const error: any = new Error('Customer tidak ditemukan.');
+        error.code = 'CUSTOMER_NOT_ACTIVE';
+        throw error;
+      }
+
       // 1. Insert Activity
       const [actRes] = await conn.execute<any>(
         `INSERT INTO follow_up_activities (
@@ -271,7 +283,7 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
         `UPDATE customers SET
           last_contact_date = ?, next_follow_up_date = ?, current_rule_step = ?,
           status_id = ?, updated_at = NOW()
-         WHERE id = ?`,
+         WHERE id = ? AND deleted_at IS NULL`,
         [today, finalNextDate, targetStep, targetStatusId, customer.id]
       );
 
@@ -307,6 +319,10 @@ export async function logActivity(req: AuthenticatedRequest, res: Response): Pro
     });
   } catch (err: any) {
     console.error('[FollowUp logActivity error]', err);
+    if (err?.code === 'CUSTOMER_NOT_ACTIVE') {
+      res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
+      return;
+    }
     res.status(500).json({ success: false, message: 'Gagal mencatat aktivitas follow-up.' });
   }
 }
@@ -315,7 +331,7 @@ export async function getCustomerActivities(req: AuthenticatedRequest, res: Resp
   const customerId = parseInt(req.params.customerId, 10);
 
   try {
-    const [cRows] = await pool.query<any[]>('SELECT id, assigned_sales_id FROM customers WHERE id = ? LIMIT 1', [customerId]);
+    const [cRows] = await pool.query<any[]>('SELECT id, assigned_sales_id FROM customers WHERE id = ? AND deleted_at IS NULL LIMIT 1', [customerId]);
 
     if (!cRows || cRows.length === 0) {
       res.status(404).json({ success: false, message: 'Customer tidak ditemukan.' });
