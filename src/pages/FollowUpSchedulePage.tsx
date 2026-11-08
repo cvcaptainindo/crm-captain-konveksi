@@ -26,27 +26,33 @@ export const FollowUpSchedulePage: React.FC<FollowUpSchedulePageProps> = ({
   const [activeTab, setActiveTab] = useState<'all' | 'OVERDUE' | 'DUE_TODAY' | 'UPCOMING'>('all');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadSchedule = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const firstPage = await apiRequest('/customers?page=1&limit=100&sort_by=next_follow_up_date&sort_dir=asc');
-      if (firstPage.success && Array.isArray(firstPage.data)) {
-        const allCustomers: Customer[] = [...firstPage.data];
-        const totalPages = Math.max(1, Number(firstPage.meta?.total_pages) || 1);
-
-        for (let page = 2; page <= totalPages; page += 1) {
-          const pageRes = await apiRequest(`/customers?page=${page}&limit=100&sort_by=next_follow_up_date&sort_dir=asc`);
-          if (!pageRes.success || !Array.isArray(pageRes.data)) {
-            throw new Error('Gagal memuat seluruh halaman agenda follow-up.');
-          }
-          allCustomers.push(...pageRes.data);
-        }
-
-        setCustomers(allCustomers);
+      if (!firstPage.success || !Array.isArray(firstPage.data)) {
+        throw new Error(firstPage.message || 'Gagal memuat agenda follow-up.');
       }
+
+      const allCustomers: Customer[] = [...firstPage.data];
+      const totalPages = Math.max(1, Number(firstPage.meta?.total_pages) || 1);
+
+      for (let page = 2; page <= totalPages; page += 1) {
+        const pageRes = await apiRequest(`/customers?page=${page}&limit=100&sort_by=next_follow_up_date&sort_dir=asc`);
+        if (!pageRes.success || !Array.isArray(pageRes.data)) {
+          throw new Error(pageRes.message || 'Gagal memuat seluruh halaman agenda follow-up.');
+        }
+        allCustomers.push(...pageRes.data);
+      }
+
+      setCustomers(allCustomers);
     } catch (err: any) {
-      showToast(err.message || 'Gagal memuat agenda follow-up.', 'error');
+      const message = err.message || 'Gagal memuat agenda follow-up.';
+      setLoadError(message);
+      showToast(message, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -141,6 +147,18 @@ export const FollowUpSchedulePage: React.FC<FollowUpSchedulePageProps> = ({
           <div className="p-12 text-center text-xs text-neutral-500 flex flex-col items-center justify-center gap-2 min-h-[220px]">
             <RefreshCw className="w-5 h-5 animate-spin text-[#c5a059]" />
             <span>Memuat jadwal agenda...</span>
+          </div>
+        ) : loadError ? (
+          <div className="p-12 text-center text-xs text-rose-600 space-y-3">
+            <p className="font-semibold">Agenda follow-up gagal dimuat.</p>
+            <p className="text-neutral-500">{loadError}</p>
+            <button
+              type="button"
+              onClick={loadSchedule}
+              className="min-h-[40px] px-4 py-2 rounded-xl bg-neutral-900 text-white font-semibold hover:bg-neutral-800"
+            >
+              Coba Lagi
+            </button>
           </div>
         ) : filteredList.length === 0 ? (
           <div className="p-12 text-center text-xs text-neutral-500">
