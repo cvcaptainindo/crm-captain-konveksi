@@ -154,7 +154,6 @@ export const pool: Pool = mysql.createPool(dbConfig);
 // MySQL's @@session.time_zone, which controls NOW() and TIMESTAMP behavior.
 pool.on('connection', (connection) => {
   void connection
-    .promise()
     .query("SET time_zone = '+07:00'")
     .catch((error: any) => {
       console.error(
