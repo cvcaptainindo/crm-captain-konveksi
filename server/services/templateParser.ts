@@ -40,6 +40,7 @@ export function parseTemplate(templateText: string, context: TemplateContext): s
     day: 'numeric',
     month: 'long',
     year: 'numeric',
+    timeZone: 'Asia/Jakarta',
   });
 
   const replacements: Record<string, string> = {

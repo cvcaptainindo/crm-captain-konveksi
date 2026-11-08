@@ -3,6 +3,7 @@ import { Customer, CustomerStatus, User } from '../types/index.js';
 import { useAuth } from '../contexts/AuthContext.js';
 import { useToast } from '../contexts/ToastContext.js';
 import { apiRequest, downloadBlob } from '../api/client.js';
+import { getTodayWIBDateString } from '../utils/dateFormatter.js';
 import {
   Search,
   Plus,
@@ -138,7 +139,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
 
       const blob = await apiRequest<Blob>(`/export/customers?${params.toString()}`);
       const extension = format === 'csv' ? 'csv' : 'xlsx';
-      const filename = `CRM_CaptainKonveksi_${new Date().toISOString().slice(0, 10)}.${extension}`;
+      const filename = `CRM_CaptainKonveksi_${getTodayWIBDateString()}.${extension}`;
       downloadBlob(blob, filename);
       showToast(`Data customer berhasil diekspor (${format.toUpperCase()}).`, 'success');
     } catch (err: any) {

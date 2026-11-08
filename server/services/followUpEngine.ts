@@ -86,11 +86,11 @@ export function computeNextFollowUp(
     }
   }
 
-  const targetDateObj = new Date();
-  targetDateObj.setDate(targetDateObj.getDate() + intervalDays);
-
-  const options: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' };
-  const nextDate = new Intl.DateTimeFormat('en-CA', options).format(targetDateObj);
+  // Anchor calendar arithmetic to the WIB date, independent of the server's local timezone.
+  const todayWIB = getTodayDateString();
+  const targetDateObj = new Date(`${todayWIB}T00:00:00.000Z`);
+  targetDateObj.setUTCDate(targetDateObj.getUTCDate() + intervalDays);
+  const nextDate = targetDateObj.toISOString().slice(0, 10);
 
   return {
     nextDate,

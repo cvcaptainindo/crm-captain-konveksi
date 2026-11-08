@@ -30,9 +30,20 @@ export const FollowUpSchedulePage: React.FC<FollowUpSchedulePageProps> = ({
   const loadSchedule = async () => {
     setIsLoading(true);
     try {
-      const res = await apiRequest('/customers?limit=100&sort_by=next_follow_up_date&sort_dir=asc');
-      if (res.success && res.data) {
-        setCustomers(res.data);
+      const firstPage = await apiRequest('/customers?page=1&limit=100&sort_by=next_follow_up_date&sort_dir=asc');
+      if (firstPage.success && Array.isArray(firstPage.data)) {
+        const allCustomers: Customer[] = [...firstPage.data];
+        const totalPages = Math.max(1, Number(firstPage.meta?.total_pages) || 1);
+
+        for (let page = 2; page <= totalPages; page += 1) {
+          const pageRes = await apiRequest(`/customers?page=${page}&limit=100&sort_by=next_follow_up_date&sort_dir=asc`);
+          if (!pageRes.success || !Array.isArray(pageRes.data)) {
+            throw new Error('Gagal memuat seluruh halaman agenda follow-up.');
+          }
+          allCustomers.push(...pageRes.data);
+        }
+
+        setCustomers(allCustomers);
       }
     } catch (err: any) {
       showToast(err.message || 'Gagal memuat agenda follow-up.', 'error');

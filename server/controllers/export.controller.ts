@@ -36,10 +36,12 @@ export async function exportCustomers(req: AuthenticatedRequest, res: Response):
       conditions.push(`(
         LOWER(c.name) LIKE ? OR
         LOWER(COALESCE(c.company_name, '')) LIKE ? OR
+        LOWER(COALESCE(c.pic_name, '')) LIKE ? OR
         LOWER(COALESCE(c.city, '')) LIKE ? OR
-        c.whatsapp_number LIKE ?
+        c.whatsapp_number LIKE ? OR
+        LOWER(COALESCE(c.customer_code, '')) LIKE ?
       )`);
-      params.push(q, q, q, q);
+      params.push(q, q, q, q, q, q);
     }
 
     const whereClause = conditions.join(' AND ');
