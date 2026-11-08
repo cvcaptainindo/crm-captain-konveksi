@@ -76,8 +76,163 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-neutral-950/75 backdrop-blur-xs overflow-y-auto print:p-0 print:bg-white print:static">
-      <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden flex flex-col max-h-[96vh] print:max-h-none print:shadow-none print:border-none print:rounded-none animate-in fade-in duration-200">
+    <div className="invoice-print-root fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-neutral-950/75 backdrop-blur-xs overflow-y-auto print:p-0 print:bg-white print:static">
+      {!isQuotation && (
+        <style>{`
+          @page {
+            size: A4 portrait;
+            margin: 12mm;
+          }
+
+          @media print {
+            html, body {
+              width: 100% !important;
+              height: auto !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: visible !important;
+              background: #fff !important;
+            }
+
+            body * {
+              visibility: hidden !important;
+            }
+
+            .invoice-print-root,
+            .invoice-print-root * {
+              visibility: visible !important;
+            }
+
+            .invoice-print-root {
+              position: absolute !important;
+              top: 0 !important;
+              left: 0 !important;
+              display: block !important;
+              width: 100% !important;
+              height: auto !important;
+              min-height: 0 !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: visible !important;
+              background: #fff !important;
+              z-index: 999999 !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+
+            .invoice-print-modal {
+              display: block !important;
+              width: 100% !important;
+              max-width: none !important;
+              max-height: none !important;
+              height: auto !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: visible !important;
+              border: 0 !important;
+              border-radius: 0 !important;
+              box-shadow: none !important;
+              background: #fff !important;
+              animation: none !important;
+            }
+
+            .invoice-print-sheet {
+              display: block !important;
+              width: 100% !important;
+              height: auto !important;
+              max-height: none !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: visible !important;
+            }
+
+            .invoice-print-paper {
+              display: block !important;
+              width: 100% !important;
+              max-width: none !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: visible !important;
+              border: 0 !important;
+              border-radius: 0 !important;
+              box-shadow: none !important;
+            }
+
+            .invoice-print-header {
+              display: flex !important;
+              flex-direction: row !important;
+              align-items: center !important;
+              justify-content: space-between !important;
+              gap: 12mm !important;
+              break-inside: avoid;
+              page-break-inside: avoid;
+            }
+
+            .invoice-print-meta {
+              display: grid !important;
+              grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+              gap: 8mm !important;
+            }
+
+            .invoice-print-items,
+            .invoice-print-payments {
+              width: 100% !important;
+              border-collapse: collapse !important;
+              table-layout: fixed !important;
+            }
+
+            .invoice-print-items thead,
+            .invoice-print-payments thead {
+              display: table-header-group !important;
+            }
+
+            .invoice-print-items tr,
+            .invoice-print-payments tr {
+              break-inside: avoid;
+              page-break-inside: avoid;
+            }
+
+            .invoice-print-items th,
+            .invoice-print-items td,
+            .invoice-print-payments th,
+            .invoice-print-payments td {
+              overflow-wrap: anywhere;
+              vertical-align: top;
+            }
+
+            .invoice-print-summary {
+              display: flex !important;
+              flex-direction: row !important;
+              align-items: flex-start !important;
+              justify-content: space-between !important;
+              gap: 8mm !important;
+            }
+
+            .invoice-print-total {
+              flex: 0 0 72mm !important;
+              width: 72mm !important;
+              max-width: 72mm !important;
+            }
+
+            .invoice-print-payment-section {
+              break-inside: auto;
+              page-break-inside: auto;
+            }
+
+            .invoice-print-signature {
+              break-inside: avoid !important;
+              page-break-inside: avoid !important;
+            }
+
+            .invoice-print-root button,
+            .invoice-print-root .print\\:hidden {
+              display: none !important;
+            }
+          }
+        `}</style>
+      )}
+
+      <div className="invoice-print-modal w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden flex flex-col max-h-[96vh] print:max-h-none print:shadow-none print:border-none print:rounded-none animate-in fade-in duration-200">
         {/* Modal Top Bar (Hidden in Print) */}
         <div className="px-5 py-3 bg-neutral-900 text-white flex items-center justify-between border-b border-neutral-800 shrink-0 print:hidden">
           <div className="flex items-center gap-2">
@@ -127,10 +282,10 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
         </div>
 
         {/* Printable Document Sheet */}
-        <div className="flex-1 overflow-y-auto p-6 sm:p-10 text-neutral-900 font-sans print:p-0 print:overflow-visible">
-          <div className="border border-neutral-200 rounded-xl p-6 sm:p-8 print:border-none print:p-0 shadow-2xs">
+        <div className="invoice-print-sheet flex-1 overflow-y-auto p-6 sm:p-10 text-neutral-900 font-sans print:p-0 print:overflow-visible">
+          <div className="invoice-print-paper border border-neutral-200 rounded-xl p-6 sm:p-8 print:border-none print:p-0 shadow-2xs">
             {/* Header / Kop Surat */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b-2 border-neutral-900">
+            <div className="invoice-print-header flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b-2 border-neutral-900">
               <div className="flex items-center gap-3.5">
                 <img
                   src={invoiceSettings?.company_logo_url || '/logo.jpg'}
@@ -187,7 +342,7 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
             </div>
 
             {/* Document & Customer Meta Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 py-6 text-xs">
+            <div className="invoice-print-meta grid grid-cols-1 sm:grid-cols-2 gap-6 py-6 text-xs">
               {/* Customer Info */}
               <div className="space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 block mb-1">
@@ -231,7 +386,7 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
 
             {/* Multi-Item Table */}
             <div className="border border-neutral-200 rounded-lg overflow-hidden my-4">
-              <table className="w-full text-left text-xs">
+              <table className="invoice-print-items w-full text-left text-xs">
                 <thead className="bg-neutral-900 text-white text-[11px] uppercase tracking-wider">
                   <tr>
                     <th className="py-2.5 px-3 w-8 text-center">#</th>
@@ -273,7 +428,7 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
             </div>
 
             {/* Calculations & Summary Section */}
-            <div className="flex flex-col sm:flex-row items-start justify-between gap-6 py-4">
+            <div className="invoice-print-summary flex flex-col sm:flex-row items-start justify-between gap-6 py-4">
               <div className="flex-1 space-y-3 text-xs">
                 {document.notes && (
                   <div>
@@ -310,7 +465,7 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
               </div>
 
               {/* Subtotal & Grand Total Box */}
-              <div className="w-full sm:w-72 bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-xs font-mono space-y-2">
+              <div className="invoice-print-total w-full sm:w-72 bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-xs font-mono space-y-2">
                 <div className="flex items-center justify-between text-neutral-600">
                   <span>Subtotal:</span>
                   <span className="font-semibold text-neutral-900">
@@ -361,11 +516,11 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
 
             {/* Payment History Table (If Invoice has payments) */}
             {!isQuotation && document.payments && document.payments.length > 0 && (
-              <div className="my-4 border border-neutral-200 rounded-lg overflow-hidden text-xs">
+              <div className="invoice-print-payment-section my-4 border border-neutral-200 rounded-lg overflow-hidden text-xs">
                 <div className="bg-neutral-100 px-3 py-2 font-bold text-neutral-800 text-[11px] uppercase tracking-wider font-mono">
                   Riwayat Pembayaran Diterima ({document.payments.length})
                 </div>
-                <table className="w-full text-left">
+                <table className="invoice-print-payments w-full text-left">
                   <thead className="bg-neutral-50 text-neutral-500 text-[10px] uppercase border-b border-neutral-200">
                     <tr>
                       <th className="py-2 px-3">Tanggal</th>
@@ -394,7 +549,7 @@ Sales PIC: ${document.sales_name || 'Tim Sales'}`;
 
 
             {/* Signature Block */}
-            <div className="grid grid-cols-2 gap-8 pt-8 mt-6 border-t border-neutral-200 text-center text-xs">
+            <div className="invoice-print-signature grid grid-cols-2 gap-8 pt-8 mt-6 border-t border-neutral-200 text-center text-xs">
               <div>
                 <div className="text-[11px] text-neutral-500 mb-14">Diterima & Disetujui Oleh,</div>
                 <div className="border-t border-neutral-300 w-44 mx-auto pt-1 font-bold text-neutral-900">
