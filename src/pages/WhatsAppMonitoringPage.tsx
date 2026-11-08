@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { FollowUpMonitoringItem, User } from '../types/index.js';
 import { apiRequest } from '../api/client.js';
 import { useToast } from '../contexts/ToastContext.js';
+import { formatToWIB } from '../utils/dateFormatter.js';
 import {
   MessageSquare,
   Search,
@@ -102,14 +103,7 @@ export const WhatsAppMonitoringPage: React.FC = () => {
   const formatDateString = (dtStr?: string) => {
     if (!dtStr) return '-';
     try {
-      const d = new Date(dtStr);
-      return d.toLocaleString('id-ID', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
+      return formatToWIB(dtStr);
     } catch {
       return dtStr;
     }

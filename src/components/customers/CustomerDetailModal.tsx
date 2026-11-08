@@ -1355,13 +1355,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                                 </span>
                               </div>
                               <span className="text-[10px] text-neutral-400 font-mono shrink-0">
-                                {new Date(act.activity_date).toLocaleString('id-ID', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  year: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
+                                {formatToWIB(act.activity_date)}
                               </span>
                             </div>
 

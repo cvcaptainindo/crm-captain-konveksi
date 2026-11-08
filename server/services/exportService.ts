@@ -18,6 +18,22 @@ export function sanitizeSpreadsheetCell(value: any): any {
   return value;
 }
 
+function getWIBFilenameTimestamp(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const values: Record<string, string> = {};
+  for (const part of parts) values[part.type] = part.value;
+  return `${values.year}-${values.month}-${values.day}T${values.hour}-${values.minute}-${values.second}`;
+}
+
 export function generateCustomerExport(
   customers: any[],
   format: 'xlsx' | 'csv' = 'xlsx',
@@ -57,7 +73,7 @@ export function generateCustomerExport(
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Data Customer');
 
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const timestamp = getWIBFilenameTimestamp();
 
   if (format === 'csv') {
     const csvOutput = XLSX.utils.sheet_to_csv(worksheet);
@@ -102,7 +118,7 @@ export function generateActivityExport(
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Histori Follow-Up');
 
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const timestamp = getWIBFilenameTimestamp();
 
   if (format === 'csv') {
     const csvOutput = XLSX.utils.sheet_to_csv(worksheet);
