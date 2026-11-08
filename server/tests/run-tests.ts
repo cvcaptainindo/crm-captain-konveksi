@@ -5,7 +5,7 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { validateDbConfig, testDbConnection, checkDbHealth } from '../database/db.js';
+import { pool, validateDbConfig, testDbConnection, checkDbHealth } from '../database/db.js';
 import { getJwtSecret } from '../middlewares/auth.middleware.js';
 import { validatePasswordStrength, FORBIDDEN_PASSWORDS, OWNER_EMAIL, promptHiddenPassword } from '../../scripts/bootstrap-owner.js';
 import {
@@ -147,6 +147,22 @@ async function runTestSuite() {
     assert.strictEqual(['ok', 'error'].includes(health.status), true);
     assert.strictEqual(typeof health.database, 'string');
     assert.strictEqual(typeof health.host, 'string');
+  });
+
+  await runTest('MySQL pool initializes session timezone to WIB (+07:00)', async () => {
+    const conn = await pool.getConnection();
+    try {
+      const [rows] = await conn.query(
+        'SELECT @@session.time_zone AS session_time_zone'
+      );
+      assert.strictEqual(
+        (rows as any[])[0]?.session_time_zone,
+        '+07:00',
+        'Every new MySQL pool connection must use WIB session timezone'
+      );
+    } finally {
+      conn.release();
+    }
   });
 
   await runTest('getJwtSecret rejects empty secret in production mode', () => {

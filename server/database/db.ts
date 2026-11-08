@@ -149,6 +149,20 @@ export const dbConfig = {
 // Singleton pool instance
 export const pool: Pool = mysql.createPool(dbConfig);
 
+// Ensure every newly-created pooled connection uses the application WIB timezone.
+// mysql2's `timezone` option controls JS date conversion; it does not set
+// MySQL's @@session.time_zone, which controls NOW() and TIMESTAMP behavior.
+pool.on('connection', (connection) => {
+  void connection
+    .promise()
+    .query("SET time_zone = '+07:00'")
+    .catch((error: any) => {
+      console.error(
+        `[DB] Failed to set MySQL session timezone (+07:00): ${error?.code || 'UNKNOWN'}`
+      );
+    });
+});
+
 // Configuration validation
 export function validateDbConfig(): { isValid: boolean; warnings: string[]; errors: string[] } {
   const warnings: string[] = [];
