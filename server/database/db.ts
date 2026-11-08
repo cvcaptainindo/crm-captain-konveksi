@@ -1,4 +1,5 @@
 import mysql, { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import type { Connection as CoreConnection } from 'mysql2';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -153,13 +154,16 @@ export const pool: Pool = mysql.createPool(dbConfig);
 // mysql2's `timezone` option controls JS date conversion; it does not set
 // MySQL's @@session.time_zone, which controls NOW() and TIMESTAMP behavior.
 pool.on('connection', (connection) => {
-  void connection
-    .query("SET time_zone = '+07:00'")
-    .catch((error: any) => {
-      console.error(
-        `[DB] Failed to set MySQL session timezone (+07:00): ${error?.code || 'UNKNOWN'}`
-      );
-    });
+  (connection as unknown as CoreConnection).query(
+    "SET time_zone = '+07:00'",
+    (error) => {
+      if (error) {
+        console.error(
+          `[DB] Failed to set MySQL session timezone (+07:00): ${error.code || 'UNKNOWN'}`
+        );
+      }
+    }
+  );
 });
 
 // Configuration validation
