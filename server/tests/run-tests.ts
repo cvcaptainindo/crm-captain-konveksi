@@ -1717,48 +1717,52 @@ async function runTestSuite() {
     assert.strictEqual(statusCode, 0);
   });
 
-  await runTest('Check I2: Follow-up monitoring query enforces c.deleted_at IS NULL, sales scope, and search', () => {
-    const buildConditions = (sales_id?: string, date_from?: string, date_to?: string, search?: string) => {
-      const whereConditions: string[] = ['c.deleted_at IS NULL'];
-      const params: any[] = [];
+  await runTest('Check I2: actual monitoring controller filters by assigned Sales and preserves activity actor', () => {
+    const controllerPath = path.resolve(process.cwd(), 'server/controllers/followUp.controller.ts');
+    const controller = fs.readFileSync(controllerPath, 'utf-8');
+    const functionStart = controller.indexOf('export async function getFollowUpMonitoringList');
 
-      if (sales_id && sales_id !== 'all') {
-        const parsed = parseInt(sales_id, 10);
-        if (!isNaN(parsed)) {
-          whereConditions.push('a.user_id = ?');
-          params.push(parsed);
-        }
-      }
-      if (date_from) {
-        whereConditions.push('DATE(a.activity_date) >= ?');
-        params.push(date_from);
-      }
-      if (date_to) {
-        whereConditions.push('DATE(a.activity_date) <= ?');
-        params.push(date_to);
-      }
-      if (search && search.trim()) {
-        const pattern = `%${search.trim()}%`;
-        whereConditions.push('(c.name LIKE ? OR c.company_name LIKE ? OR c.whatsapp_number LIKE ? OR a.notes LIKE ? OR a.message_sent LIKE ?)');
-        params.push(pattern, pattern, pattern, pattern, pattern);
-      }
+    assert.notStrictEqual(functionStart, -1,
+      'Actual getFollowUpMonitoringList controller must exist');
 
-      return { whereClause: whereConditions.join(' AND '), params };
-    };
+    const monitoringController = controller.slice(functionStart);
 
-    const res1 = buildConditions();
-    assert.strictEqual(res1.whereClause, 'c.deleted_at IS NULL');
-    assert.strictEqual(res1.params.length, 0);
-
-    const res2 = buildConditions('5', '2026-10-01', '2026-10-21', 'PT Maju');
-    assert.strictEqual(res2.whereClause.includes('c.deleted_at IS NULL'), true);
-    assert.strictEqual(res2.whereClause.includes('a.user_id = ?'), true);
-    assert.strictEqual(res2.whereClause.includes('DATE(a.activity_date) >= ?'), true);
-    assert.strictEqual(res2.whereClause.includes('DATE(a.activity_date) <= ?'), true);
-    assert.strictEqual(res2.params[0], 5);
-    assert.strictEqual(res2.params[1], '2026-10-01');
-    assert.strictEqual(res2.params[2], '2026-10-21');
-    assert.strictEqual(res2.params[3], '%PT Maju%');
+    assert.strictEqual(
+      monitoringController.includes("const whereConditions: string[] = ['c.deleted_at IS NULL']") ||
+      monitoringController.includes("whereConditions.push('c.deleted_at IS NULL')"),
+      true,
+      'Monitoring must exclude soft-deleted customers'
+    );
+    assert.strictEqual(
+      monitoringController.includes("whereConditions.push('c.assigned_sales_id = ?')"),
+      true,
+      'Sales filter must use the customer assigned Sales ID'
+    );
+    assert.strictEqual(
+      monitoringController.includes("whereConditions.push('a.user_id = ?')"),
+      false,
+      'Activity actor must not be used as the assigned Sales filter'
+    );
+    assert.strictEqual(
+      monitoringController.includes("DATE(a.activity_date) >= ?"),
+      true,
+      'Monitoring must preserve date_from filter'
+    );
+    assert.strictEqual(
+      monitoringController.includes("DATE(a.activity_date) <= ?"),
+      true,
+      'Monitoring must preserve date_to filter'
+    );
+    assert.strictEqual(
+      monitoringController.includes('c.name LIKE ? OR c.company_name LIKE ?'),
+      true,
+      'Monitoring must preserve customer/search filtering'
+    );
+    assert.strictEqual(
+      monitoringController.includes('LEFT JOIN users u ON a.user_id = u.id'),
+      true,
+      'Activity actor identity must remain available for history display'
+    );
   });
 
   await runTest('Check I3: Audit codebase guarantees zero shadow scraping, zero puppeteer sessions, zero fake blue ticks', () => {

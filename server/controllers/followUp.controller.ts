@@ -385,7 +385,7 @@ export async function getFollowUpMonitoringList(req: AuthenticatedRequest, res: 
     if (sales_id && sales_id !== 'all') {
       const parsedSalesId = parseInt(String(sales_id), 10);
       if (!isNaN(parsedSalesId)) {
-        whereConditions.push('a.user_id = ?');
+        whereConditions.push('c.assigned_sales_id = ?');
         params.push(parsedSalesId);
       }
     }
