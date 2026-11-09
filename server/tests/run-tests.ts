@@ -825,6 +825,48 @@ async function runTestSuite() {
     );
   });
 
+  await runTest('FIX-04: Invoice lifecycle starts UNPAID and legacy DRAFT/SENT invoices are migrated', () => {
+    const documentController = fs.readFileSync(
+      path.resolve(process.cwd(), 'server/controllers/document.controller.ts'),
+      'utf-8'
+    );
+    const formSource = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/components/documents/DocumentFormModal.tsx'),
+      'utf-8'
+    );
+    const migration = fs.readFileSync(
+      path.resolve(process.cwd(), 'server/database/migration_invoice_receivables_status.sql'),
+      'utf-8'
+    );
+
+    assert.ok(documentController.includes("const finalStatus = 'UNPAID'"), 'New invoices must start as UNPAID');
+    assert.ok(!documentController.includes("['DRAFT', 'SENT', 'UNPAID', 'OVERDUE']"), 'Invoice updates must reject DRAFT/SENT');
+    assert.ok(formSource.includes("status: docType === 'INVOICE'"), 'Invoice form must submit an active invoice status');
+    assert.ok(migration.includes("doc_type = 'INVOICE'"), 'Migration must target invoices only');
+    assert.ok(migration.includes("status IN ('DRAFT', 'SENT')"), 'Migration must convert legacy invoice statuses');
+    assert.ok(migration.includes("SET status = 'UNPAID'"), 'Legacy invoice statuses must become UNPAID');
+  });
+
+  await runTest('FIX-04: Receivables include unpaid balances and PDF omits document status', () => {
+    const transactionController = fs.readFileSync(
+      path.resolve(process.cwd(), 'server/controllers/transaction.controller.ts'),
+      'utf-8'
+    );
+    const documentView = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/components/documents/DocumentViewModal.tsx'),
+      'utf-8'
+    );
+    const receivableStart = transactionController.indexOf('const [receivableRows]');
+    const receivableEnd = transactionController.indexOf('const [annualRows]', receivableStart);
+    assert.ok(receivableStart >= 0 && receivableEnd > receivableStart, 'Receivable aggregation query must exist');
+    const receivableQuery = transactionController.slice(receivableStart, receivableEnd);
+    assert.ok(receivableQuery.includes("d.status NOT IN ('CANCELLED', 'CANCEL')"), 'Only cancelled invoices must be excluded by lifecycle status');
+    assert.ok(!receivableQuery.includes("d.status IN ('UNPAID', 'PARTIAL', 'OVERDUE', 'CLOSING')"), 'Receivables must not depend on a whitelist of statuses');
+    assert.ok(receivableQuery.includes('GREATEST(0, d.total_amount -'), 'Receivables must be based on outstanding balance');
+    assert.ok(receivableQuery.includes(')) > 0'), 'Only invoices with positive outstanding balances must count as receivables');
+    assert.ok(!documentView.includes('STATUS: {document.status}'), 'Printable document must not display status');
+  });
+
   await runTest('Permanent deletion policy blocks deletion of customers with transactions', () => {
     const customerTransactions = [{ id: 1, amount: 20000000, status: 'CLOSING' }];
     const canPermanentlyDelete = customerTransactions.length === 0;

@@ -26,7 +26,7 @@ const dateLabel = (value?: string | null) => {
 };
 
 const statusLabel: Record<string, string> = {
-  DRAFT: 'Draft', SENT: 'Terkirim', UNPAID: 'Belum Dibayar', PARTIAL: 'Dibayar Sebagian',
+  UNPAID: 'Belum Dibayar', PARTIAL: 'Dibayar Sebagian',
   PAID: 'Lunas', OVERDUE: 'Jatuh Tempo', CLOSING: 'Closing', CANCELLED: 'Dibatalkan', CANCEL: 'Dibatalkan',
 };
 
