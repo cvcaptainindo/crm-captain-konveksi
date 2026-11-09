@@ -50,7 +50,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
   const todayStr = getTodayWIBDateString();
   const [docDate, setDocDate] = useState(todayStr);
   const [dueDate, setDueDate] = useState('');
-  const [status, setStatus] = useState<'DRAFT' | 'SENT'>('DRAFT');
+  const [status, setStatus] = useState<string>(docType === 'INVOICE' ? 'UNPAID' : 'DRAFT');
   const [notes, setNotes] = useState('');
   const [invoiceType, setInvoiceType] = useState<string>('INVOICE STANDARD');
   const [customInvoiceType, setCustomInvoiceType] = useState<string>('');
@@ -120,7 +120,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
       } else {
         setDocDate(todayStr);
         setDueDate('');
-        setStatus('DRAFT');
+        setStatus(docType === 'INVOICE' ? 'UNPAID' : 'DRAFT');
         setNotes('');
         setTerms(docType === 'QUOTATION' ? DEFAULT_QUOTATION_TERMS : '');
         setDiscount(0);
@@ -250,7 +250,9 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
         customer_id: customer.id,
         doc_date: docDate,
         due_date: dueDate || null,
-        status,
+        status: docType === 'INVOICE'
+          ? (editingDoc?.status === 'OVERDUE' ? 'OVERDUE' : 'UNPAID')
+          : status,
         notes,
         terms,
         discount: numDiscount,
@@ -341,20 +343,22 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
               <span className="text-neutral-500 text-[10px] font-mono">{user?.email}</span>
             </div>
 
-            <div>
-              <label className="text-neutral-500 block text-[11px] font-medium mb-1">
-                Status Dokumen:
-              </label>
-              <select
-                value={status}
-                onChange={e => setStatus(e.target.value as any)}
-                className="w-full text-xs font-semibold px-2.5 py-1.5 bg-white border border-neutral-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#c5a059]"
-              >
-                <option value="DRAFT">DRAFT (Konsep)</option>
-                <option value="SENT">SENT (Terkirim ke Customer)</option>
-                {docType === 'QUOTATION' && <option value="APPROVED">APPROVED (Disetujui)</option>}
-              </select>
-            </div>
+            {docType !== 'INVOICE' && (
+              <div>
+                <label className="text-neutral-500 block text-[11px] font-medium mb-1">
+                  Status Dokumen:
+                </label>
+                <select
+                  value={status}
+                  onChange={e => setStatus(e.target.value)}
+                  className="w-full text-xs font-semibold px-2.5 py-1.5 bg-white border border-neutral-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[#c5a059]"
+                >
+                  <option value="DRAFT">DRAFT (Konsep)</option>
+                  <option value="SENT">SENT (Terkirim ke Customer)</option>
+                  {docType === 'QUOTATION' && <option value="APPROVED">APPROVED (Disetujui)</option>}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Dates */}

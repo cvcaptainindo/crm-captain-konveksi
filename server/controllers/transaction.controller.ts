@@ -618,7 +618,8 @@ export async function getOmzetOverview(req: AuthenticatedRequest, res: Response)
          FROM sales_document_payments GROUP BY document_id
        ) p ON p.document_id = d.id
        WHERE d.doc_type = 'INVOICE'
-         AND d.status IN ('UNPAID', 'PARTIAL', 'OVERDUE', 'CLOSING')${documentSalesFilter}`,
+         AND d.status NOT IN ('CANCELLED', 'CANCEL')
+         AND GREATEST(0, d.total_amount - COALESCE(NULLIF(p.total_paid, 0), d.paid_amount, 0)) > 0${documentSalesFilter}`,
       documentSalesParams
     );
 

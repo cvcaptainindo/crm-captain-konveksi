@@ -435,7 +435,6 @@ export async function createDocument(req: AuthenticatedRequest, res: Response): 
     items,
     discount = 0,
     tax = 0,
-    status,
     invoice_type,
     parent_invoice_id,
   } = req.body;
@@ -519,12 +518,8 @@ export async function createDocument(req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    // Phase one only permits initial Invoice states that are selectable in the form.
-    const finalStatus = String(status || 'DRAFT').toUpperCase();
-    if (!['DRAFT', 'SENT'].includes(finalStatus)) {
-      res.status(400).json({ success: false, message: 'Status awal Invoice harus DRAFT atau SENT.' });
-      return;
-    }
+    // Every new invoice starts as UNPAID; DRAFT/SENT are not invoice lifecycle states.
+    const finalStatus = 'UNPAID';
 
     const invoiceMetadata = normalizeInvoiceMetadata(invoice_type, parent_invoice_id);
     const result = await withTransaction(async (conn) => {
@@ -708,7 +703,7 @@ export async function updateDocument(req: AuthenticatedRequest, res: Response): 
       : null;
 
     const normalizedStatus = status ? String(status).toUpperCase() : undefined;
-    if (normalizedStatus && !['DRAFT', 'SENT', 'UNPAID', 'OVERDUE'].includes(normalizedStatus)) {
+    if (normalizedStatus && !['UNPAID', 'OVERDUE'].includes(normalizedStatus)) {
       res.status(400).json({ success: false, message: 'Status Invoice tidak valid untuk perubahan manual.' });
       return;
     }
